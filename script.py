@@ -526,15 +526,17 @@ class SpotifyToTidalTransfer:
                 auth_manager.token_info = token_info
             
             self.spotify = spotipy.Spotify(auth_manager=auth_manager)
-            
-            # Test the connection and save token
+
+            # Test the connection
             user = self.spotify.current_user()
             print(f"✓ Spotify authenticated as: {user['display_name']}")
 
-            # Save token info for future use (must save the full token_info dict)
-            if auth_manager.token_info:
+            # Save token info for future use
+            # get_cached_token() returns the current token dict after any refresh
+            current_token = auth_manager.get_cached_token()
+            if current_token:
                 self.session_manager.save_spotify_session(
-                    auth_manager.token_info,
+                    current_token,
                     self.spotify_client_id
                 )
 
