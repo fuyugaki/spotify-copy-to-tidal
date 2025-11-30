@@ -219,24 +219,30 @@ Built with:
 ### Version 0.0.3 (Current)
 
 **Added**:
-- ✅ **Liked Songs support** - Transfer your Liked Songs (appears first in playlist list)
-- ✅ Playlist export to TXT and M3U formats
+- ✅ **Liked Songs support** - Transfer your Liked Songs (appears first in playlist list, use `--playlist-id liked`)
+- ✅ **Playlist export** with three formats:
+  - `txt` - Plain text with track info
+  - `txt-links` - Text with Spotify/Tidal URLs
+  - `m3u` - Standard M3U playlist format
+- ✅ **Interactive action menu** - Choose transfer or export after selecting playlist
 - ✅ Full CLI with subcommands (`list`, `transfer`, `export`)
-- ✅ Export from both Spotify and Tidal sources
 - ✅ `--verbose` flag for debug logging
 - ✅ `--client-id` and `--client-secret` CLI flags
 
-**Liked Songs examples**:
-```bash
-python3 script.py transfer --playlist-id liked --yes         # Transfer Liked Songs
-python3 script.py export --playlist-id liked                 # Export Liked Songs
-```
+**Fixed**:
+- ✅ Tidal OAuth no longer prompts twice
+- ✅ Spotify token saving uses correct method
 
-**Export examples**:
+**Examples**:
 ```bash
-python3 script.py export --playlist-id ID                    # Export to TXT
-python3 script.py export --playlist-id ID --format m3u       # Export to M3U
-python3 script.py export --playlist-id ID --source tidal     # Export Tidal playlist
+# Liked Songs
+python3 script.py transfer --playlist-id liked --yes
+
+# Export formats
+python3 script.py export --playlist-id ID --format txt         # Plain text
+python3 script.py export --playlist-id ID --format txt-links   # With Spotify URLs
+python3 script.py export --playlist-id ID --format m3u         # M3U format
+python3 script.py export --playlist-id liked --source tidal    # Export from Tidal
 ```
 
 ### Version 0.0.2

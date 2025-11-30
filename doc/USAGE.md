@@ -103,35 +103,49 @@ Expected success rates:
 
 Export playlists to TXT or M3U format for backup or use with other tools.
 
+### Interactive Menu
+
+After selecting a playlist, choose an action:
+```
+What would you like to do?
+  1. Transfer to Tidal
+  2. Export to TXT file
+  3. Export to TXT file (with Spotify links)
+  4. Export to M3U file
+  q. Cancel
+```
+
 ### Export Formats
 
-**TXT** (default): Human-readable with track details
+**txt** (default): Human-readable with track details
 ```
-Playlist: My Playlist
-Source: Spotify
-Total tracks: 50
-==================================================
-
   1. Artist - Title
      Album: Album Name
      Duration: 3:45
 ```
 
-**M3U**: Standard playlist format compatible with media players
+**txt-links**: With Spotify/Tidal URLs
+```
+  1. Artist - Title
+     Album: Album Name
+     Spotify: https://open.spotify.com/track/xxxxx
+```
+
+**m3u**: Standard M3U playlist format
 ```
 #EXTM3U
 #PLAYLIST:My Playlist
 #EXTINF:225,Artist - Title
-# Album: Album Name
+
 ```
 
 ### Export Options
 
 | Option | Description |
 |--------|-------------|
-| `--playlist-id` | Required. Playlist ID to export |
+| `--playlist-id` | Required. Playlist ID to export (or `liked`) |
 | `--source` | `spotify` (default) or `tidal` |
-| `--format`, `-f` | `txt` (default) or `m3u` |
+| `--format`, `-f` | `txt`, `txt-links`, or `m3u` (default: txt) |
 | `--output`, `-o` | Custom output filename |
 
 Use `python3 script.py list` to find playlist IDs.

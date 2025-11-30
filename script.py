@@ -379,52 +379,79 @@ class TidalAuthManager:
         """Try login_oauth_simple method (newer versions)"""
         if not hasattr(self.session, 'login_oauth_simple'):
             return False
-        
-        print("Attempting OAuth simple login...")
-        print("Please check your browser for Tidal login prompt...")
-        
-        success = self.session.login_oauth_simple()
-        
-        if success and self._validate_session():
-            print("✓ OAuth simple login successful")
-            return True
-        
+
+        try:
+            print("Attempting OAuth login...")
+            result = self.session.login_oauth_simple()
+
+            # Handle tuple return (login_info, future)
+            if isinstance(result, tuple) and len(result) == 2:
+                login, future = result
+
+                url = getattr(login, 'verification_uri_complete', None) or f"https://link.tidal.com/{login.user_code}"
+                expires = getattr(login, 'expires_in', 300)
+
+                print(f"Visit {url} to log in (expires in {expires} seconds)")
+
+                # Open browser automatically
+                import webbrowser
+                webbrowser.open(url)
+
+                # Wait for user to complete login
+                future.result(timeout=300)
+
+                if self._validate_session():
+                    print("✓ Tidal login successful")
+                    return True
+            elif result:
+                # Direct success
+                if self._validate_session():
+                    print("✓ Tidal login successful")
+                    return True
+
+        except Exception as e:
+            logger.debug(f"OAuth simple failed: {e}")
+
         return False
-    
+
     def _try_oauth_device_flow(self) -> bool:
-        """Try device flow OAuth (some versions)"""
+        """Try device flow OAuth - skip if oauth_simple exists (they're the same)"""
+        # Skip if login_oauth_simple exists - it's the same mechanism
+        if hasattr(self.session, 'login_oauth_simple'):
+            return False
+
         if not hasattr(self.session, 'login_oauth'):
             return False
-        
+
         try:
             print("Attempting device flow OAuth...")
             result = self.session.login_oauth()
-            
+
             # Handle different return types
             if isinstance(result, tuple) and len(result) == 2:
                 login_info, future = result
-                print(f"Go to: {login_info.verification_uri}")
-                print(f"Enter code: {login_info.user_code}")
+
+                url = getattr(login_info, 'verification_uri_complete', None) or f"https://link.tidal.com/{login_info.user_code}"
+                print(f"Visit {url} to log in")
+
+                import webbrowser
+                webbrowser.open(url)
+
                 print("Waiting for authentication...")
-                
-                # Wait for completion with timeout
-                try:
-                    session = future.result(timeout=300)  # 5 minute timeout
-                    if session and self._validate_session():
-                        print("✓ Device flow OAuth successful")
-                        return True
-                except Exception as e:
-                    print(f"Device flow timeout or error: {e}")
-                    return False
+
+                future.result(timeout=300)
+                if self._validate_session():
+                    print("✓ Tidal login successful")
+                    return True
             else:
                 # Direct return
                 if result and self._validate_session():
                     print("✓ OAuth successful")
                     return True
-        
+
         except Exception as e:
             logger.debug(f"Device flow failed: {e}")
-        
+
         return False
     
     def _try_legacy_oauth(self) -> bool:
@@ -1275,7 +1302,8 @@ class SpotifyToTidalTransfer:
                 if not safe_name:
                     safe_name = "playlist"
                 safe_name = safe_name[:100]
-                output_file = f"{safe_name}_{source}_{timestamp}.{output_format}"
+                ext = "txt" if output_format == "txt-links" else output_format
+                output_file = f"{safe_name}_{source}_{timestamp}.{ext}"
 
             # Write file based on format
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -1285,9 +1313,21 @@ class SpotifyToTidalTransfer:
                     for track in tracks:
                         duration_sec = track.duration_ms // 1000
                         f.write(f"#EXTINF:{duration_sec},{track.artist} - {track.title}\n")
-                        # M3U typically has a path/URL, but we don't have that
-                        # Use a comment format that's still parseable
-                        f.write(f"# Album: {track.album}\n")
+                        f.write("\n")  # Empty path line
+                elif output_format == "txt-links":
+                    f.write(f"Playlist: {playlist_name}\n")
+                    f.write(f"Source: {source.capitalize()}\n")
+                    f.write(f"Exported: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Total tracks: {len(tracks)}\n")
+                    f.write("=" * 50 + "\n\n")
+                    for i, track in enumerate(tracks, 1):
+                        f.write(f"{i:3}. {track.artist} - {track.title}\n")
+                        f.write(f"     Album: {track.album}\n")
+                        if track.spotify_id:
+                            f.write(f"     Spotify: https://open.spotify.com/track/{track.spotify_id}\n")
+                        if track.tidal_id:
+                            f.write(f"     Tidal: https://tidal.com/browse/track/{track.tidal_id}\n")
+                        f.write("\n")
                 else:  # txt format
                     f.write(f"Playlist: {playlist_name}\n")
                     f.write(f"Source: {source.capitalize()}\n")
@@ -1355,8 +1395,8 @@ Examples:
     export_parser.add_argument('--playlist-id', required=True, help='Playlist ID to export')
     export_parser.add_argument('--source', choices=['spotify', 'tidal'], default='spotify',
                               help='Source service (default: spotify)')
-    export_parser.add_argument('--format', '-f', choices=['txt', 'm3u'], default='txt',
-                              help='Output format (default: txt)')
+    export_parser.add_argument('--format', '-f', choices=['txt', 'txt-links', 'm3u'], default='txt',
+                              help='Output format: txt, txt-links (with URLs), m3u (default: txt)')
     export_parser.add_argument('--output', '-o', help='Output filename (auto-generated if not specified)')
 
     return parser
@@ -1480,7 +1520,7 @@ def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
 
     while True:
         try:
-            choice = input(f"\nChoose a playlist to transfer (1-{len(playlists)}, or 'q' to quit): ")
+            choice = input(f"\nChoose a playlist (1-{len(playlists)}, or 'q' to quit): ")
             if choice.lower() == 'q':
                 print("Goodbye!")
                 return 0
@@ -1496,14 +1536,56 @@ def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
     print(f"\nYou selected: {selected_playlist['name']}")
     print(f"This playlist has {selected_playlist['tracks_count']} tracks")
 
-    confirm = input("Proceed with transfer? (y/N): ")
-    if confirm.lower() != 'y':
-        print("Transfer cancelled.")
-        return 0
+    # Action menu
+    print("\nWhat would you like to do?")
+    print("  1. Transfer to Tidal")
+    print("  2. Export to TXT file")
+    print("  3. Export to TXT file (with Spotify links)")
+    print("  4. Export to M3U file")
+    print("  q. Cancel")
 
-    results = transfer_tool.transfer_playlist(selected_playlist['id'], custom_name)
-    transfer_tool.print_transfer_summary(results)
-    return 0 if results.get('success') else 1
+    action = input("\nChoice: ").strip().lower()
+
+    if action == 'q':
+        print("Cancelled.")
+        return 0
+    elif action == '2':
+        # Export to TXT
+        result = transfer_tool.export_playlist(
+            playlist_id=selected_playlist['id'],
+            source='spotify',
+            output_format='txt'
+        )
+        return 0 if result else 1
+    elif action == '3':
+        # Export to TXT with links
+        result = transfer_tool.export_playlist(
+            playlist_id=selected_playlist['id'],
+            source='spotify',
+            output_format='txt-links'
+        )
+        return 0 if result else 1
+    elif action == '4':
+        # Export to M3U
+        result = transfer_tool.export_playlist(
+            playlist_id=selected_playlist['id'],
+            source='spotify',
+            output_format='m3u'
+        )
+        return 0 if result else 1
+    elif action == '1':
+        # Transfer to Tidal
+        confirm = input("Proceed with transfer? (y/N): ")
+        if confirm.lower() != 'y':
+            print("Transfer cancelled.")
+            return 0
+
+        results = transfer_tool.transfer_playlist(selected_playlist['id'], custom_name)
+        transfer_tool.print_transfer_summary(results)
+        return 0 if results.get('success') else 1
+    else:
+        print("Invalid choice.")
+        return 1
 
 
 def cmd_export(transfer_tool: SpotifyToTidalTransfer, args) -> int:
