@@ -75,11 +75,17 @@ Missing tracks exported to: missing_tracks_My_Music_Collection_20250816_143022.t
 
 Comprehensive documentation is available in the [`/doc`](doc/) directory:
 
+### User Guides
 - **[Installation Guide](doc/INSTALLATION.md)** - Complete setup instructions
 - **[Usage Guide](doc/USAGE.md)** - How to use the tool
 - **[Configuration Guide](doc/CONFIGURATION.md)** - Customization options
 - **[Troubleshooting Guide](doc/TROUBLESHOOTING.md)** - Solutions to common issues
 - **[Security Guide](doc/SECURITY.md)** - Security best practices
+
+### Developer Documentation
+- **[Issues by Priority](doc/ISSUES_BY_PRIORITY.md)** - Prioritized issue tracker and roadmap
+- **[Status Summary](doc/STATUS_SUMMARY.md)** - Project status and metrics
+- **[Additional Issues](doc/ADDITIONAL_ISSUES.md)** - Detailed technical analysis
 
 ## How It Works
 
