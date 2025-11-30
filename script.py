@@ -12,7 +12,7 @@ import hashlib
 import re
 import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 from dataclasses import dataclass
 from fuzzywuzzy import fuzz
 import spotipy
@@ -38,6 +38,19 @@ class Track:
 
     def __str__(self):
         return f"{self.artist} - {self.title}"
+
+
+@dataclass
+class NearMatch:
+    """Represents a potential match found during search"""
+    tidal_id: str
+    title: str
+    artist: str
+    album: str
+    score: float
+
+    def __str__(self):
+        return f"{self.artist} - {self.title} ({self.album}) [{self.score:.0f}%]"
 
 
 class AuthenticationError(Exception):
@@ -754,8 +767,18 @@ class SpotifyToTidalTransfer:
             logger.error(f"Failed to get playlist tracks: {e}")
             raise
     
-    def search_tidal_track(self, track: Track) -> Optional[Tuple[str, int]]:
-        """Enhanced track search with CJK character handling and multiple strategies"""
+    def search_tidal_track(self, track: Track, collect_near_matches: bool = False) -> Union[Tuple[str, int], Tuple[None, List[NearMatch]], None]:
+        """Enhanced track search with CJK character handling and multiple strategies.
+
+        Args:
+            track: The track to search for
+            collect_near_matches: If True and no match found, return near-matches instead
+
+        Returns:
+            If match found: (tidal_id, score)
+            If no match and collect_near_matches=True: (None, list of NearMatch)
+            If no match and collect_near_matches=False: None
+        """
         if not self.tidal_auth_manager or not self.tidal_auth_manager.session:
             raise Exception("Tidal not authenticated")
 
@@ -764,57 +787,74 @@ class SpotifyToTidalTransfer:
 
         best_match = None
         best_score = 0
+        near_matches: Dict[str, NearMatch] = {}  # Use dict to dedupe by tidal_id
         search_attempts = 0
         # Limit searches to 4 attempts max (reduced from 8 to minimize API calls)
         max_search_attempts = min(len(search_queries), 4)
-        
+
+        # Determine threshold
+        is_cjk = TextProcessor.has_cjk_characters(track.title) or TextProcessor.has_cjk_characters(track.artist)
+        threshold = self.cjk_match_threshold if is_cjk else self.match_threshold
+        near_match_threshold = 30  # Minimum score to consider as a near match
+
         print(f"    Trying {max_search_attempts} search strategies...")
-        
+
         for i, query in enumerate(search_queries[:max_search_attempts]):
             if len(query.strip()) < 2:
                 continue
-                
+
             try:
                 search_attempts += 1
                 self.rate_limiter.wait()
-                
+
                 # Debug info for CJK tracks
-                if TextProcessor.has_cjk_characters(track.title) or TextProcessor.has_cjk_characters(track.artist):
+                if is_cjk:
                     print(f"    Strategy {i+1}: '{query}'")
-                
+
                 search_results = self.tidal_auth_manager.session.search(
                     query, [tidalapi.Track], limit=self.max_search_results
                 )
-                
+
                 if not search_results or 'tracks' not in search_results:
                     continue
-                
+
                 for tidal_track in search_results['tracks']:
                     # Enhanced matching for different character sets
                     scores = self._calculate_match_scores(track, tidal_track, query)
                     combined_score = max(scores)  # Take the best score from different strategies
-                    
-                    # Use different thresholds for CJK vs Latin tracks
-                    threshold = self.cjk_match_threshold if (TextProcessor.has_cjk_characters(track.title) or TextProcessor.has_cjk_characters(track.artist)) else self.match_threshold
-                    
+
+                    # Extract track info for potential near-match collection
+                    artist_name = tidal_track.artist.name if tidal_track.artist and hasattr(tidal_track.artist, 'name') else 'Unknown'
+                    track_name = tidal_track.name if hasattr(tidal_track, 'name') else 'Unknown'
+                    album_name = tidal_track.album.name if tidal_track.album and hasattr(tidal_track.album, 'name') else 'Unknown'
+
                     if combined_score > best_score and combined_score >= threshold:
                         best_score = combined_score
                         best_match = tidal_track.id
-                        
+
                         # Debug info for good matches
-                        if TextProcessor.has_cjk_characters(track.title) or TextProcessor.has_cjk_characters(track.artist):
-                            artist_name = tidal_track.artist.name if tidal_track.artist and hasattr(tidal_track.artist, 'name') else 'Unknown'
-                            track_name = tidal_track.name if hasattr(tidal_track, 'name') else 'Unknown'
+                        if is_cjk:
                             print(f"    Match found: '{artist_name} - {track_name}' (Score: {combined_score:.1f}%)")
-                
+
+                    # Collect near matches (below threshold but above minimum)
+                    elif collect_near_matches and combined_score >= near_match_threshold and combined_score < threshold:
+                        if tidal_track.id not in near_matches or near_matches[tidal_track.id].score < combined_score:
+                            near_matches[tidal_track.id] = NearMatch(
+                                tidal_id=tidal_track.id,
+                                title=track_name,
+                                artist=artist_name,
+                                album=album_name,
+                                score=combined_score
+                            )
+
                 # If we found an excellent match, stop searching
                 if best_score >= 95:
                     break
-                    
+
                 # For CJK tracks, try a few more strategies even with lower scores
-                if best_score >= 85 and not (TextProcessor.has_cjk_characters(track.title) or TextProcessor.has_cjk_characters(track.artist)):
+                if best_score >= 85 and not is_cjk:
                     break
-                    
+
             except Exception as e:
                 if "429" in str(e) or "rate limit" in str(e).lower():
                     self.rate_limiter.backoff()
@@ -823,9 +863,15 @@ class SpotifyToTidalTransfer:
                 else:
                     logger.debug(f"Search error for '{query}': {e}")
                     continue
-        
+
         if best_match:
             return best_match, int(best_score)
+
+        if collect_near_matches and near_matches:
+            # Sort by score descending and return top matches
+            sorted_matches = sorted(near_matches.values(), key=lambda x: x.score, reverse=True)[:10]
+            return None, sorted_matches
+
         return None
     
     def _calculate_match_scores(self, original_track: Track, tidal_track, search_query: str) -> List[float]:
@@ -883,7 +929,260 @@ class SpotifyToTidalTransfer:
                     scores.append(latin_artist_score * 0.7)  # Lower weight for artist-only
         
         return scores
-    
+
+    def search_tidal_artist(self, artist_name: str) -> List[Dict]:
+        """Search for an artist on Tidal and return top tracks."""
+        if not self.tidal_auth_manager or not self.tidal_auth_manager.session:
+            raise Exception("Tidal not authenticated")
+
+        try:
+            self.rate_limiter.wait()
+            search_results = self.tidal_auth_manager.session.search(
+                artist_name, [tidalapi.Artist], limit=5
+            )
+
+            if not search_results or 'artists' not in search_results or not search_results['artists']:
+                return []
+
+            artists = []
+            for artist in search_results['artists'][:5]:
+                artists.append({
+                    'id': artist.id,
+                    'name': artist.name,
+                    'artist_obj': artist
+                })
+            return artists
+
+        except Exception as e:
+            logger.debug(f"Artist search error: {e}")
+            return []
+
+    def get_artist_top_tracks(self, artist) -> List[NearMatch]:
+        """Get top tracks for an artist."""
+        try:
+            self.rate_limiter.wait()
+            top_tracks = artist.get_top_tracks(limit=15)
+
+            results = []
+            for track in top_tracks:
+                artist_name = track.artist.name if track.artist and hasattr(track.artist, 'name') else 'Unknown'
+                album_name = track.album.name if track.album and hasattr(track.album, 'name') else 'Unknown'
+                results.append(NearMatch(
+                    tidal_id=track.id,
+                    title=track.name,
+                    artist=artist_name,
+                    album=album_name,
+                    score=0  # No score for browsed tracks
+                ))
+            return results
+
+        except Exception as e:
+            logger.debug(f"Get top tracks error: {e}")
+            return []
+
+    def custom_tidal_search(self, query: str) -> List[NearMatch]:
+        """Perform a custom search on Tidal."""
+        if not self.tidal_auth_manager or not self.tidal_auth_manager.session:
+            raise Exception("Tidal not authenticated")
+
+        try:
+            self.rate_limiter.wait()
+            search_results = self.tidal_auth_manager.session.search(
+                query, [tidalapi.Track], limit=15
+            )
+
+            if not search_results or 'tracks' not in search_results:
+                return []
+
+            results = []
+            for track in search_results['tracks']:
+                artist_name = track.artist.name if track.artist and hasattr(track.artist, 'name') else 'Unknown'
+                album_name = track.album.name if track.album and hasattr(track.album, 'name') else 'Unknown'
+                results.append(NearMatch(
+                    tidal_id=track.id,
+                    title=track.name,
+                    artist=artist_name,
+                    album=album_name,
+                    score=0  # No auto score for custom search
+                ))
+            return results
+
+        except Exception as e:
+            logger.debug(f"Custom search error: {e}")
+            return []
+
+    def interactive_track_fallback(self, track: Track, near_matches: List[NearMatch]) -> Optional[str]:
+        """Interactive fallback when automatic matching fails.
+
+        Args:
+            track: The track that wasn't found
+            near_matches: List of potential matches found during search
+
+        Returns:
+            tidal_id if user selects a track, None to skip
+        """
+        skip_all = False
+
+        while True:
+            print(f"\n  ⚠️  Could not automatically match: {track}")
+            print(f"      Album: {track.album}")
+            print()
+
+            # Build options
+            options = []
+            if near_matches:
+                options.append(f"1. Show near matches ({len(near_matches)} found)")
+            else:
+                options.append("1. Show near matches (none found)")
+            options.append("2. Search by artist on Tidal")
+            options.append("3. Custom search")
+            options.append("4. Skip this track")
+            options.append("5. Skip all remaining unfound tracks")
+
+            for opt in options:
+                print(f"      {opt}")
+
+            try:
+                choice = input("\n      Choice (1-5): ").strip()
+            except EOFError:
+                return None
+
+            if choice == '1':
+                # Show near matches
+                if not near_matches:
+                    print("\n      No near matches were found during search.")
+                    continue
+
+                selected = self._display_track_selection(near_matches, "Near Matches")
+                if selected:
+                    return selected
+
+            elif choice == '2':
+                # Search by artist
+                selected = self._artist_search_flow(track)
+                if selected:
+                    return selected
+
+            elif choice == '3':
+                # Custom search
+                selected = self._custom_search_flow(track)
+                if selected:
+                    return selected
+
+            elif choice == '4':
+                # Skip this track
+                print("      Skipping track.")
+                return None
+
+            elif choice == '5':
+                # Skip all
+                print("      Skipping all remaining unfound tracks.")
+                return 'SKIP_ALL'
+
+            else:
+                print("      Invalid choice. Please enter 1-5.")
+
+    def _display_track_selection(self, tracks: List[NearMatch], title: str) -> Optional[str]:
+        """Display a list of tracks and let user select one."""
+        print(f"\n      --- {title} ---")
+        for i, match in enumerate(tracks, 1):
+            if match.score > 0:
+                print(f"      {i:2}. {match.artist} - {match.title}")
+                print(f"          Album: {match.album} | Score: {match.score:.0f}%")
+            else:
+                print(f"      {i:2}. {match.artist} - {match.title}")
+                print(f"          Album: {match.album}")
+
+        print(f"       0. Back to options")
+
+        try:
+            choice = input(f"\n      Select track (0-{len(tracks)}): ").strip()
+            if choice == '0' or choice == '':
+                return None
+
+            idx = int(choice) - 1
+            if 0 <= idx < len(tracks):
+                selected = tracks[idx]
+                print(f"      ✓ Selected: {selected.artist} - {selected.title}")
+                return selected.tidal_id
+
+        except (ValueError, EOFError):
+            pass
+
+        print("      Invalid selection.")
+        return None
+
+    def _artist_search_flow(self, track: Track) -> Optional[str]:
+        """Flow for searching by artist."""
+        # Extract primary artist (first one)
+        primary_artist = track.artist.split(',')[0].strip()
+
+        print(f"\n      Searching for artist: {primary_artist}")
+        artists = self.search_tidal_artist(primary_artist)
+
+        if not artists:
+            # Let user try a different artist name
+            try:
+                custom_artist = input("      No artists found. Enter artist name (or press Enter to go back): ").strip()
+                if not custom_artist:
+                    return None
+                artists = self.search_tidal_artist(custom_artist)
+                if not artists:
+                    print("      No artists found.")
+                    return None
+            except EOFError:
+                return None
+
+        # Show artist selection
+        print(f"\n      --- Artists Found ---")
+        for i, artist in enumerate(artists, 1):
+            print(f"      {i}. {artist['name']}")
+        print(f"      0. Back to options")
+
+        try:
+            choice = input(f"\n      Select artist (0-{len(artists)}): ").strip()
+            if choice == '0' or choice == '':
+                return None
+
+            idx = int(choice) - 1
+            if 0 <= idx < len(artists):
+                selected_artist = artists[idx]
+                print(f"\n      Loading top tracks for {selected_artist['name']}...")
+                top_tracks = self.get_artist_top_tracks(selected_artist['artist_obj'])
+
+                if not top_tracks:
+                    print("      No tracks found for this artist.")
+                    return None
+
+                return self._display_track_selection(top_tracks, f"Top Tracks by {selected_artist['name']}")
+
+        except (ValueError, EOFError):
+            pass
+
+        print("      Invalid selection.")
+        return None
+
+    def _custom_search_flow(self, track: Track) -> Optional[str]:
+        """Flow for custom search."""
+        # Suggest a search query
+        suggested = f"{track.title}"
+
+        try:
+            query = input(f"      Enter search query [{suggested}]: ").strip()
+            if not query:
+                query = suggested
+        except EOFError:
+            return None
+
+        print(f"      Searching for: {query}")
+        results = self.custom_tidal_search(query)
+
+        if not results:
+            print("      No results found.")
+            return None
+
+        return self._display_track_selection(results, "Search Results")
+
     def create_tidal_playlist(self, name: str, description: str = "") -> Optional[str]:
         """Create playlist with retry logic"""
         if not self.tidal_auth_manager or not self.tidal_auth_manager.session:
@@ -951,12 +1250,14 @@ class SpotifyToTidalTransfer:
             return False
     
     def transfer_playlist(self, spotify_playlist_id: str,
-                         new_playlist_name: str = None) -> Dict:
+                         new_playlist_name: str = None,
+                         interactive: bool = False) -> Dict:
         """Enhanced playlist transfer with comprehensive error handling.
 
         Args:
             spotify_playlist_id: Playlist ID, or 'liked' for Liked Songs
             new_playlist_name: Optional custom name for Tidal playlist
+            interactive: If True, prompt user for manual matching when tracks aren't found
         """
         print(f"\n--- Starting Enhanced Playlist Transfer ---")
 
@@ -994,6 +1295,7 @@ class SpotifyToTidalTransfer:
             # Search for tracks on Tidal with progress updates
             found_tracks = []
             not_found_tracks = []
+            skip_all_unfound = False  # Flag to skip interactive prompts for remaining tracks
 
             print("\n--- Searching for tracks on Tidal ---")
             for i, track in enumerate(tracks, 1):
@@ -1002,18 +1304,57 @@ class SpotifyToTidalTransfer:
                     print(f"[{i}/{len(tracks)}] {track} (Japanese/CJK)")
                 else:
                     print(f"[{i}/{len(tracks)}] {track}")
-                
+
                 try:
-                    search_result = self.search_tidal_track(track)
+                    # Use collect_near_matches when in interactive mode
+                    search_result = self.search_tidal_track(track, collect_near_matches=interactive)
+
                     if search_result:
-                        tidal_id, score = search_result
-                        track.tidal_id = tidal_id
-                        found_tracks.append(track)
-                        print(f"  ✓ Found (Score: {score}%)")
+                        # Check if it's a successful match (tuple with id and score)
+                        if isinstance(search_result, tuple) and len(search_result) == 2:
+                            first_elem = search_result[0]
+                            # If first element is a string, it's a match (tidal_id, score)
+                            if isinstance(first_elem, str):
+                                tidal_id, score = search_result
+                                track.tidal_id = tidal_id
+                                found_tracks.append(track)
+                                print(f"  ✓ Found (Score: {score}%)")
+                                continue
+                            # If first element is None, it's (None, near_matches)
+                            elif first_elem is None:
+                                near_matches = search_result[1]
+                                # Fall through to interactive handling below
+                            else:
+                                # Unexpected format
+                                not_found_tracks.append(track)
+                                print(f"  ✗ Not found")
+                                continue
+                        else:
+                            # Unexpected result format
+                            not_found_tracks.append(track)
+                            print(f"  ✗ Not found")
+                            continue
+                    else:
+                        near_matches = []
+
+                    # Track not found - handle interactively or skip
+                    if interactive and not skip_all_unfound:
+                        print(f"  ✗ Not found automatically")
+                        fallback_result = self.interactive_track_fallback(track, near_matches)
+
+                        if fallback_result == 'SKIP_ALL':
+                            skip_all_unfound = True
+                            not_found_tracks.append(track)
+                        elif fallback_result:
+                            track.tidal_id = fallback_result
+                            found_tracks.append(track)
+                            print(f"  ✓ Manually matched")
+                        else:
+                            not_found_tracks.append(track)
                     else:
                         not_found_tracks.append(track)
                         print(f"  ✗ Not found")
-                        
+
                 except Exception as e:
                     logger.warning(f"Search failed for {track}: {e}")
                     not_found_tracks.append(track)
@@ -1503,7 +1844,8 @@ def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
                 print("Transfer cancelled.")
                 return 0
 
-        results = transfer_tool.transfer_playlist(playlist_id, custom_name)
+        # Non-interactive mode when --yes is used, otherwise allow interactive fallback
+        results = transfer_tool.transfer_playlist(playlist_id, custom_name, interactive=not skip_confirm)
         transfer_tool.print_transfer_summary(results)
         return 0 if results.get('success') else 1
 
@@ -1575,7 +1917,7 @@ def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
         elif action == '1':
             confirm = input("Proceed with transfer? (y/N): ")
             if confirm.lower() == 'y':
-                results = transfer_tool.transfer_playlist(selected_playlist['id'], custom_name)
+                results = transfer_tool.transfer_playlist(selected_playlist['id'], custom_name, interactive=True)
                 transfer_tool.print_transfer_summary(results)
         else:
             print("Invalid choice.")
