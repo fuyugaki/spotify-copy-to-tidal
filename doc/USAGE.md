@@ -67,7 +67,7 @@ rm -rf ~/.spotify_tidal_config/
     ✓ Found (Score: 92%)
 [2/186] Japanese Artist - 日本語タイトル (Japanese/CJK)
     Trying 4 search strategies...
-    ✗ Not found
+    ✗ Not found automatically
 ```
 
 ### Match Scores
@@ -78,6 +78,66 @@ rm -rf ~/.spotify_tidal_config/
 | 80-89% | Good match |
 | 70-79% | Acceptable (CJK tracks) |
 | <70% | Not used (marked as not found) |
+
+## Interactive Track Fallback
+
+When a track isn't found automatically in interactive mode, you'll see options to manually find it:
+
+```
+  ⚠️  Could not automatically match: 井内 竜次 - WHEEL
+      Album: NieR:Automata
+
+      1. Show near matches (3 found)
+      2. Search by artist on Tidal
+      3. Custom search
+      4. Lookup artist aliases (MusicBrainz)
+      5. Skip this track
+      6. Skip all remaining unfound tracks
+
+      Choice (1-6):
+```
+
+### Options Explained
+
+| Option | Description |
+|--------|-------------|
+| **Near matches** | Shows tracks that scored below the threshold but might be correct |
+| **Search by artist** | Find the artist on Tidal and browse their top tracks |
+| **Custom search** | Enter your own search query |
+| **MusicBrainz lookup** | Find alternate names/romanizations for the artist (e.g., `井内竜次` → `Ryuji Iuchi`) |
+| **Skip** | Skip this track and continue |
+| **Skip all** | Skip all remaining unfound tracks without prompting |
+
+### MusicBrainz Artist Lookup
+
+MusicBrainz stores alternate names and aliases for artists worldwide. This is especially useful for non-Latin artists:
+
+```
+      Looking up artist on MusicBrainz: 井内 竜次
+
+      --- MusicBrainz Results ---
+      1. 井内竜次 (score: 100%)
+         Aliases: Iuchi, Ryuji [Sort name], Ryuji Iuchi, IUCHI Ryuuji
+      0. Back to options
+
+      Select artist (0-1): 1
+
+      --- Search with name ---
+      1. 井内竜次 + WHEEL
+      2. Iuchi, Ryuji + WHEEL
+      3. Ryuji Iuchi + WHEEL
+      0. Back
+
+      Select name to search (0-3):
+```
+
+### Disabling Interactive Fallback
+
+Use `--yes` flag for fully automated transfers (no prompts):
+
+```bash
+python3 script.py transfer --playlist-id PLAYLIST_ID --yes
+```
 
 ## Missing Tracks
 

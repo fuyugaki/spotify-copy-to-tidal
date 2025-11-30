@@ -6,6 +6,8 @@ Transfer your playlists from Spotify to Tidal with intelligent track matching, i
 
 - **Smart Track Matching**: Multiple fuzzy matching strategies for accurate track identification
 - **CJK Character Support**: Enhanced matching for Japanese, Korean, and Chinese music
+- **Interactive Fallback**: Manual search options when automatic matching fails (near matches, artist browse, custom search)
+- **MusicBrainz Integration**: Lookup artist aliases and romanized names for international artists
 - **Session Persistence**: Saves authentication for 24 hours (no repeated logins)
 - **Rate Limiting**: Intelligent API throttling with exponential backoff
 - **Detailed Reporting**: Comprehensive statistics with language-specific success rates
@@ -216,7 +218,17 @@ Built with:
 
 ## Changelog
 
-### 0.0.3 (Current)
+### 0.0.4 (Current)
+- **Interactive track fallback**: When a track isn't found, offers manual search options
+  - Show near matches (tracks below threshold but potentially correct)
+  - Search by artist on Tidal (browse artist's top tracks)
+  - Custom search query
+  - MusicBrainz artist alias lookup (finds romanized names for non-Latin artists)
+  - Skip track / Skip all remaining
+- **MusicBrainz integration**: Lookup alternate artist names and aliases for better matching of international artists
+- Works in interactive mode; use `--yes` flag for fully automated (no prompts)
+
+### 0.0.3
 - Liked Songs support (`--playlist-id liked`)
 - Playlist export: `txt`, `txt-links`, `m3u` formats
 - Interactive menu loop (returns to playlist list after actions)

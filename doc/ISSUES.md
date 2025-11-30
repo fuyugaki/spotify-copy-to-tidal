@@ -10,6 +10,21 @@
 | High Priority | ⚠️ 3 remaining (quick fixes) |
 | Tests | ❌ None |
 
+## ✅ Completed (v0.0.4)
+
+**Interactive Fallback**: Manual search options when tracks aren't found automatically
+- Near matches display (tracks below threshold)
+- Artist search on Tidal (browse top tracks)
+- Custom search query
+- MusicBrainz artist alias lookup (romanized names for international artists)
+- Skip track / Skip all remaining options
+
+**MusicBrainz Integration**: External database lookup for artist aliases and alternate names
+
+## ✅ Completed (v0.0.3)
+
+**Features**: Liked Songs support, playlist export (txt/txt-links/m3u), interactive menu loop, full CLI with subcommands
+
 ## ✅ Completed (v0.0.2)
 
 **Security**: Environment variables, specific exception handling, file permissions (0700/0600)

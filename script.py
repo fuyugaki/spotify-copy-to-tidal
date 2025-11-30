@@ -816,6 +816,11 @@ class SpotifyToTidalTransfer:
                 )
 
                 if not search_results or 'tracks' not in search_results:
+                    logger.debug(f"No results for query '{query}': {type(search_results)}")
+                    continue
+
+                if not search_results['tracks']:
+                    logger.debug(f"Empty tracks list for query '{query}'")
                     continue
 
                 for tidal_track in search_results['tracks']:
@@ -861,7 +866,7 @@ class SpotifyToTidalTransfer:
                     time.sleep(self.rate_limiter.current_delay)
                     continue
                 else:
-                    logger.debug(f"Search error for '{query}': {e}")
+                    logger.warning(f"Search error for '{query}': {e}")
                     continue
 
         if best_match:
@@ -978,6 +983,63 @@ class SpotifyToTidalTransfer:
 
         except Exception as e:
             logger.debug(f"Get top tracks error: {e}")
+            return []
+
+    def get_artist_albums(self, artist) -> List[Dict]:
+        """Get albums for an artist."""
+        try:
+            self.rate_limiter.wait()
+            albums = artist.get_albums(limit=20)
+
+            results = []
+            for album in albums:
+                results.append({
+                    'id': album.id,
+                    'name': album.name,
+                    'year': album.year if hasattr(album, 'year') else '',
+                    'album_obj': album
+                })
+
+            # Also get EPs and singles
+            try:
+                self.rate_limiter.wait()
+                eps_singles = artist.get_ep_singles(limit=10)
+                for album in eps_singles:
+                    results.append({
+                        'id': album.id,
+                        'name': f"{album.name} (EP/Single)",
+                        'year': album.year if hasattr(album, 'year') else '',
+                        'album_obj': album
+                    })
+            except Exception:
+                pass  # Some artists may not have EPs/singles
+
+            return results
+
+        except Exception as e:
+            logger.debug(f"Get artist albums error: {e}")
+            return []
+
+    def get_album_tracks(self, album) -> List[NearMatch]:
+        """Get all tracks from an album."""
+        try:
+            self.rate_limiter.wait()
+            tracks = album.tracks()
+
+            results = []
+            for track in tracks:
+                artist_name = track.artist.name if track.artist and hasattr(track.artist, 'name') else 'Unknown'
+                results.append(NearMatch(
+                    tidal_id=track.id,
+                    title=track.name,
+                    artist=artist_name,
+                    album=album.name,
+                    score=0
+                ))
+            return results
+
+        except Exception as e:
+            logger.debug(f"Get album tracks error: {e}")
             return []
 
     def custom_tidal_search(self, query: str) -> List[NearMatch]:
@@ -1297,20 +1359,92 @@ class SpotifyToTidalTransfer:
             idx = int(choice) - 1
             if 0 <= idx < len(artists):
                 selected_artist = artists[idx]
-                print(f"\n      Loading top tracks for {selected_artist['name']}...")
-                top_tracks = self.get_artist_top_tracks(selected_artist['artist_obj'])
 
-                if not top_tracks:
-                    print("      No tracks found for this artist.")
-                    return None
+                # Sub-menu: top tracks or browse albums
+                while True:
+                    print(f"\n      --- {selected_artist['name']} ---")
+                    print(f"      1. View top tracks")
+                    print(f"      2. Browse albums/releases")
+                    print(f"      0. Back to artist list")
 
-                return self._display_track_selection(top_tracks, f"Top Tracks by {selected_artist['name']}")
+                    try:
+                        sub_choice = input(f"\n      Choice (0-2): ").strip()
+                    except EOFError:
+                        return None
+
+                    if sub_choice == '0' or sub_choice == '':
+                        break  # Go back to artist selection
+
+                    elif sub_choice == '1':
+                        # Top tracks
+                        print(f"\n      Loading top tracks for {selected_artist['name']}...")
+                        top_tracks = self.get_artist_top_tracks(selected_artist['artist_obj'])
+
+                        if not top_tracks:
+                            print("      No tracks found for this artist.")
+                            continue
+
+                        result = self._display_track_selection(top_tracks, f"Top Tracks by {selected_artist['name']}")
+                        if result:
+                            return result
+
+                    elif sub_choice == '2':
+                        # Browse albums
+                        result = self._browse_artist_albums(selected_artist)
+                        if result:
+                            return result
+
+                    else:
+                        print("      Invalid choice. Please enter 0-2.")
 
         except (ValueError, EOFError):
             pass
 
         print("      Invalid selection.")
         return None
+
+    def _browse_artist_albums(self, artist_info: Dict) -> Optional[str]:
+        """Browse albums for an artist and select tracks."""
+        print(f"\n      Loading albums for {artist_info['name']}...")
+        albums = self.get_artist_albums(artist_info['artist_obj'])
+
+        if not albums:
+            print("      No albums found for this artist.")
+            return None
+
+        while True:
+            print(f"\n      --- Albums by {artist_info['name']} ---")
+            for i, album in enumerate(albums, 1):
+                year_str = f" ({album['year']})" if album['year'] else ""
+                print(f"      {i:2}. {album['name']}{year_str}")
+            print(f"       0. Back")
+
+            try:
+                choice = input(f"\n      Select album (0-{len(albums)}): ").strip()
+            except EOFError:
+                return None
+
+            if choice == '0' or choice == '':
+                return None
+
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(albums):
+                    selected_album = albums[idx]
+                    print(f"\n      Loading tracks from {selected_album['name']}...")
+                    album_tracks = self.get_album_tracks(selected_album['album_obj'])
+
+                    if not album_tracks:
+                        print("      No tracks found in this album.")
+                        continue
+
+                    result = self._display_track_selection(album_tracks, f"Tracks from {selected_album['name']}")
+                    if result:
+                        return result
+                else:
+                    print("      Invalid selection.")
+            except ValueError:
+                print("      Invalid selection.")
 
     def _custom_search_flow(self, track: Track) -> Optional[str]:
         """Flow for custom search."""
@@ -1459,33 +1593,26 @@ class SpotifyToTidalTransfer:
                     # Use collect_near_matches when in interactive mode
                     search_result = self.search_tidal_track(track, collect_near_matches=interactive)
 
-                    if search_result:
-                        # Check if it's a successful match (tuple with id and score)
+                    # Check result type
+                    near_matches = []
+                    found_match = False
+
+                    if search_result is not None:
                         if isinstance(search_result, tuple) and len(search_result) == 2:
-                            first_elem = search_result[0]
-                            # If first element is a string, it's a match (tidal_id, score)
-                            if isinstance(first_elem, str):
+                            first_elem, second_elem = search_result
+                            # If first element is None, it's (None, near_matches)
+                            if first_elem is None:
+                                near_matches = second_elem if isinstance(second_elem, list) else []
+                            else:
+                                # It's a match: (tidal_id, score)
                                 tidal_id, score = search_result
                                 track.tidal_id = tidal_id
                                 found_tracks.append(track)
                                 print(f"  ✓ Found (Score: {score}%)")
-                                continue
-                            # If first element is None, it's (None, near_matches)
-                            elif first_elem is None:
-                                near_matches = search_result[1]
-                                # Fall through to interactive handling below
-                            else:
-                                # Unexpected format
-                                not_found_tracks.append(track)
-                                print(f"  ✗ Not found")
-                                continue
-                        else:
-                            # Unexpected result format
-                            not_found_tracks.append(track)
-                            print(f"  ✗ Not found")
-                            continue
-                    else:
-                        near_matches = []
+                                found_match = True
+
+                    if found_match:
+                        continue
 
                     # Track not found - handle interactively or skip
                     if interactive and not skip_all_unfound:
