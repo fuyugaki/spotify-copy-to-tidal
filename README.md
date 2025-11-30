@@ -19,7 +19,7 @@ Transfer your playlists from Spotify to Tidal with intelligent track matching, i
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/spotify-copy-to-tidal.git
+git clone https://github.com/fuyugaki/spotify-copy-to-tidal.git
 cd spotify-copy-to-tidal
 
 # Install dependencies
@@ -211,12 +211,16 @@ Built with:
 ## Support
 
 - **Documentation**: See [`/doc`](doc/) directory
-- **Issues**: [GitHub Issues](https://github.com/yourusername/spotify-copy-to-tidal/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/spotify-copy-to-tidal/discussions)
+- **Issues**: [GitHub Issues](https://github.com/fuyugaki/spotify-copy-to-tidal/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/fuyugaki/spotify-copy-to-tidal/discussions)
 
 ## Changelog
 
-### 0.0.3 (Current)
+### 0.0.4 (Current)
+- GitHub Codespaces support (run in browser, no local install required)
+- Improved installation documentation
+
+### 0.0.3
 - Liked Songs support (`--playlist-id liked`)
 - Playlist export: `txt`, `txt-links`, `m3u` formats
 - Interactive menu loop (returns to playlist list after actions)
