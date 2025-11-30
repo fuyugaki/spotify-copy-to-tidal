@@ -446,15 +446,18 @@ class TidalAuthManager:
         return False
     
     def _validate_session(self) -> bool:
-        """Validate session by attempting a simple API call"""
+        """Validate session by checking required attributes without API call"""
         try:
             if not self.session:
                 return False
-            
-            # Try a simple search to validate session
-            search_result = self.session.search("test", [tidalapi.Track], limit=1)
-            return search_result is not None
-            
+
+            # Check if session has required authentication attributes
+            # This avoids unnecessary API calls during validation
+            has_session_id = hasattr(self.session, 'session_id') and self.session.session_id
+            has_access_token = hasattr(self.session, 'access_token') and self.session.access_token
+
+            return has_session_id or has_access_token
+
         except Exception as e:
             logger.debug(f"Session validation failed: {e}")
             return False
@@ -601,16 +604,31 @@ class SpotifyToTidalTransfer:
             
             while results:
                 for item in results['items']:
-                    if item['track'] and item['track']['type'] == 'track':
+                    if item and item.get('track') and item['track'].get('type') == 'track':
                         track = item['track']
-                        artists = ', '.join([artist['name'] for artist in track['artists']])
-                        
+
+                        # Safely extract track metadata with defaults
+                        if not track.get('artists'):
+                            artists = 'Unknown Artist'
+                        else:
+                            artists = ', '.join([a.get('name', 'Unknown') for a in track['artists'] if a])
+
+                        title = track.get('name', 'Unknown Track')
+                        album = track.get('album', {}).get('name', 'Unknown Album') if track.get('album') else 'Unknown Album'
+                        duration_ms = track.get('duration_ms', 0)
+                        track_id = track.get('id', '')
+
+                        # Skip tracks with missing essential data
+                        if not title or title == 'Unknown Track':
+                            logger.warning(f"Skipping track with missing title: {track}")
+                            continue
+
                         tracks.append(Track(
-                            title=track['name'],
+                            title=title,
                             artist=artists,
-                            album=track['album']['name'],
-                            duration_ms=track['duration_ms'],
-                            spotify_id=track['id']
+                            album=album,
+                            duration_ms=duration_ms,
+                            spotify_id=track_id
                         ))
                 
                 if results['next']:
@@ -674,7 +692,9 @@ class SpotifyToTidalTransfer:
                         
                         # Debug info for good matches
                         if TextProcessor.has_cjk_characters(track.title) or TextProcessor.has_cjk_characters(track.artist):
-                            print(f"    Match found: '{tidal_track.artist.name} - {tidal_track.name}' (Score: {combined_score:.1f}%)")
+                            artist_name = tidal_track.artist.name if tidal_track.artist and hasattr(tidal_track.artist, 'name') else 'Unknown'
+                            track_name = tidal_track.name if hasattr(tidal_track, 'name') else 'Unknown'
+                            print(f"    Match found: '{artist_name} - {track_name}' (Score: {combined_score:.1f}%)")
                 
                 # If we found an excellent match, stop searching
                 if best_score >= 95:
@@ -700,7 +720,16 @@ class SpotifyToTidalTransfer:
     def _calculate_match_scores(self, original_track: Track, tidal_track, search_query: str) -> List[float]:
         """Calculate multiple matching scores using different strategies"""
         scores = []
-        
+
+        # Safety check for None values
+        if not tidal_track or not hasattr(tidal_track, 'name') or not tidal_track.name:
+            return [0.0]  # Return minimal score if track data is invalid
+
+        if not tidal_track.artist or not hasattr(tidal_track.artist, 'name') or not tidal_track.artist.name:
+            # If no artist info, only match on title
+            title_score = fuzz.ratio(original_track.title.lower(), tidal_track.name.lower())
+            return [title_score * 0.7]  # Lower weight for title-only match
+
         # Original matching
         title_score = fuzz.ratio(original_track.title.lower(), tidal_track.name.lower())
         artist_score = fuzz.ratio(original_track.artist.lower(), tidal_track.artist.name.lower())
@@ -828,11 +857,22 @@ class SpotifyToTidalTransfer:
             # Get all tracks
             tracks = self.get_spotify_playlist_tracks(spotify_playlist_id)
             print(f"Retrieved {len(tracks)} tracks from Spotify")
-            
+
+            # Check for empty playlist
+            if not tracks:
+                print("\n⚠️  Playlist is empty - nothing to transfer")
+                return {
+                    'success': False,
+                    'error': 'Source playlist contains no tracks',
+                    'total_tracks': 0,
+                    'found_tracks': 0,
+                    'not_found_tracks': 0
+                }
+
             # Search for tracks on Tidal with progress updates
             found_tracks = []
             not_found_tracks = []
-            
+
             print("\n--- Searching for tracks on Tidal ---")
             for i, track in enumerate(tracks, 1):
                 # Show different info for CJK vs Latin tracks
@@ -1000,7 +1040,12 @@ class SpotifyToTidalTransfer:
         try:
             # Create filename based on playlist name and timestamp
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Sanitize and ensure non-empty, with length limit
             safe_name = "".join(c for c in results['playlist_name'] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            if not safe_name:
+                safe_name = "playlist"
+            # Limit length to 100 chars (filesystem limits are typically 255)
+            safe_name = safe_name[:100]
             filename = f"missing_tracks_{safe_name}_{timestamp}.txt"
             
             with open(filename, 'w', encoding='utf-8') as f:
