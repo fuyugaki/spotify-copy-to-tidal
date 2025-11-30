@@ -9,15 +9,11 @@ import json
 import time
 import logging
 import hashlib
-import getpass
 import re
-import unicodedata
 import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
-from concurrent.futures import Future
-import threading
 from fuzzywuzzy import fuzz
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -166,24 +162,42 @@ class RateLimiter:
 
 
 class SessionManager:
-    """Manages persistent session storage with basic encryption"""
-    
+    """Manages persistent session storage
+
+    WARNING: Session data is stored locally in JSON format with basic obfuscation.
+    For production use, implement proper encryption or use a secure credential store.
+    Ensure the config directory has appropriate file permissions (0700).
+    """
+
     def __init__(self, config_dir: str = ".spotify_tidal_config"):
         self.config_dir = Path.home() / config_dir
-        self.config_dir.mkdir(exist_ok=True)
+        self.config_dir.mkdir(mode=0o700, exist_ok=True)
         self.spotify_config = self.config_dir / "spotify_session.json"
         self.tidal_config = self.config_dir / "tidal_session.json"
-    
+
+        # Ensure config files have restricted permissions
+        self._set_secure_permissions()
+
+    def _set_secure_permissions(self):
+        """Set secure file permissions on config files"""
+        for config_file in [self.spotify_config, self.tidal_config]:
+            if config_file.exists():
+                os.chmod(config_file, 0o600)
+
     def _simple_encrypt(self, data: str, key: str) -> str:
-        """Simple encryption for local storage (not cryptographically secure)"""
+        """Basic obfuscation for local storage (NOT cryptographically secure)
+
+        WARNING: This is obfuscation, not encryption. Tokens can be easily extracted.
+        For production, use proper encryption libraries like cryptography.fernet
+        """
         key_hash = hashlib.sha256(key.encode()).digest()
         encrypted = ""
         for i, char in enumerate(data):
             encrypted += chr(ord(char) ^ key_hash[i % len(key_hash)])
         return encrypted.encode('latin1').hex()
-    
+
     def _simple_decrypt(self, encrypted_hex: str, key: str) -> str:
-        """Simple decryption for local storage"""
+        """Basic de-obfuscation for local storage"""
         try:
             encrypted = bytes.fromhex(encrypted_hex).decode('latin1')
             key_hash = hashlib.sha256(key.encode()).digest()
@@ -191,63 +205,91 @@ class SessionManager:
             for i, char in enumerate(encrypted):
                 decrypted += chr(ord(char) ^ key_hash[i % len(key_hash)])
             return decrypted
-        except:
+        except (ValueError, UnicodeDecodeError, KeyError) as e:
+            logger.debug(f"Failed to decrypt session data: {e}")
             return ""
     
     def save_spotify_session(self, token_info: dict, client_id: str):
         """Save Spotify session info"""
-        data = {
-            'token_info': token_info,
-            'timestamp': time.time()
-        }
-        encrypted = self._simple_encrypt(json.dumps(data), client_id)
-        with open(self.spotify_config, 'w') as f:
-            json.dump({'data': encrypted}, f)
-    
+        try:
+            data = {
+                'token_info': token_info,
+                'timestamp': time.time()
+            }
+            encrypted = self._simple_encrypt(json.dumps(data), client_id)
+
+            # Write atomically using temp file
+            temp_file = self.spotify_config.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump({'data': encrypted}, f)
+            os.chmod(temp_file, 0o600)
+            temp_file.replace(self.spotify_config)
+
+        except (OSError, IOError) as e:
+            logger.error(f"Failed to save Spotify session: {e}")
+
     def load_spotify_session(self, client_id: str) -> Optional[dict]:
         """Load Spotify session info"""
         try:
             if not self.spotify_config.exists():
                 return None
-            
+
             with open(self.spotify_config, 'r') as f:
                 config = json.load(f)
-            
+
             decrypted = self._simple_decrypt(config['data'], client_id)
+            if not decrypted:
+                return None
+
             data = json.loads(decrypted)
-            
+
             # Check if token is expired (24 hours)
             if time.time() - data['timestamp'] > 86400:
+                logger.info("Spotify session expired, re-authentication required")
                 return None
-                
+
             return data['token_info']
-        except:
+
+        except (json.JSONDecodeError, KeyError, OSError) as e:
+            logger.debug(f"Failed to load Spotify session: {e}")
             return None
     
     def save_tidal_session(self, session_data: dict):
         """Save Tidal session info"""
-        data = {
-            'session_data': session_data,
-            'timestamp': time.time()
-        }
-        with open(self.tidal_config, 'w') as f:
-            json.dump(data, f)
-    
+        try:
+            data = {
+                'session_data': session_data,
+                'timestamp': time.time()
+            }
+
+            # Write atomically using temp file
+            temp_file = self.tidal_config.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump(data, f)
+            os.chmod(temp_file, 0o600)
+            temp_file.replace(self.tidal_config)
+
+        except (OSError, IOError) as e:
+            logger.error(f"Failed to save Tidal session: {e}")
+
     def load_tidal_session(self) -> Optional[dict]:
         """Load Tidal session info"""
         try:
             if not self.tidal_config.exists():
                 return None
-            
+
             with open(self.tidal_config, 'r') as f:
                 data = json.load(f)
-            
+
             # Check if session is expired (24 hours)
             if time.time() - data['timestamp'] > 86400:
+                logger.info("Tidal session expired, re-authentication required")
                 return None
-                
+
             return data['session_data']
-        except:
+
+        except (json.JSONDecodeError, KeyError, OSError) as e:
+            logger.debug(f"Failed to load Tidal session: {e}")
             return None
 
 
@@ -404,15 +446,18 @@ class TidalAuthManager:
         return False
     
     def _validate_session(self) -> bool:
-        """Validate session by attempting a simple API call"""
+        """Validate session by checking required attributes without API call"""
         try:
             if not self.session:
                 return False
-            
-            # Try a simple search to validate session
-            search_result = self.session.search("test", [tidalapi.Track], limit=1)
-            return search_result is not None
-            
+
+            # Check if session has required authentication attributes
+            # This avoids unnecessary API calls during validation
+            has_session_id = hasattr(self.session, 'session_id') and self.session.session_id
+            has_access_token = hasattr(self.session, 'access_token') and self.session.access_token
+
+            return has_session_id or has_access_token
+
         except Exception as e:
             logger.debug(f"Session validation failed: {e}")
             return False
@@ -485,13 +530,14 @@ class SpotifyToTidalTransfer:
             # Test the connection and save token
             user = self.spotify.current_user()
             print(f"✓ Spotify authenticated as: {user['display_name']}")
-            
-            # Save token for future use
-            self.session_manager.save_spotify_session(
-                auth_manager.get_access_token(as_dict=False),
-                self.spotify_client_id
-            )
-            
+
+            # Save token info for future use (must save the full token_info dict)
+            if auth_manager.token_info:
+                self.session_manager.save_spotify_session(
+                    auth_manager.token_info,
+                    self.spotify_client_id
+                )
+
             return True
             
         except Exception as e:
@@ -558,16 +604,31 @@ class SpotifyToTidalTransfer:
             
             while results:
                 for item in results['items']:
-                    if item['track'] and item['track']['type'] == 'track':
+                    if item and item.get('track') and item['track'].get('type') == 'track':
                         track = item['track']
-                        artists = ', '.join([artist['name'] for artist in track['artists']])
-                        
+
+                        # Safely extract track metadata with defaults
+                        if not track.get('artists'):
+                            artists = 'Unknown Artist'
+                        else:
+                            artists = ', '.join([a.get('name', 'Unknown') for a in track['artists'] if a])
+
+                        title = track.get('name', 'Unknown Track')
+                        album = track.get('album', {}).get('name', 'Unknown Album') if track.get('album') else 'Unknown Album'
+                        duration_ms = track.get('duration_ms', 0)
+                        track_id = track.get('id', '')
+
+                        # Skip tracks with missing essential data
+                        if not title or title == 'Unknown Track':
+                            logger.warning(f"Skipping track with missing title: {track}")
+                            continue
+
                         tracks.append(Track(
-                            title=track['name'],
+                            title=title,
                             artist=artists,
-                            album=track['album']['name'],
-                            duration_ms=track['duration_ms'],
-                            spotify_id=track['id']
+                            album=album,
+                            duration_ms=duration_ms,
+                            spotify_id=track_id
                         ))
                 
                 if results['next']:
@@ -586,14 +647,15 @@ class SpotifyToTidalTransfer:
         """Enhanced track search with CJK character handling and multiple strategies"""
         if not self.tidal_auth_manager or not self.tidal_auth_manager.session:
             raise Exception("Tidal not authenticated")
-        
+
         # Generate multiple search variants
         search_queries = TextProcessor.generate_search_variants(track.title, track.artist)
-        
+
         best_match = None
         best_score = 0
         search_attempts = 0
-        max_search_attempts = min(len(search_queries), 8)  # Limit searches to avoid rate limiting
+        # Limit searches to 4 attempts max (reduced from 8 to minimize API calls)
+        max_search_attempts = min(len(search_queries), 4)
         
         print(f"    Trying {max_search_attempts} search strategies...")
         
@@ -630,7 +692,9 @@ class SpotifyToTidalTransfer:
                         
                         # Debug info for good matches
                         if TextProcessor.has_cjk_characters(track.title) or TextProcessor.has_cjk_characters(track.artist):
-                            print(f"    Match found: '{tidal_track.artist.name} - {tidal_track.name}' (Score: {combined_score:.1f}%)")
+                            artist_name = tidal_track.artist.name if tidal_track.artist and hasattr(tidal_track.artist, 'name') else 'Unknown'
+                            track_name = tidal_track.name if hasattr(tidal_track, 'name') else 'Unknown'
+                            print(f"    Match found: '{artist_name} - {track_name}' (Score: {combined_score:.1f}%)")
                 
                 # If we found an excellent match, stop searching
                 if best_score >= 95:
@@ -656,7 +720,16 @@ class SpotifyToTidalTransfer:
     def _calculate_match_scores(self, original_track: Track, tidal_track, search_query: str) -> List[float]:
         """Calculate multiple matching scores using different strategies"""
         scores = []
-        
+
+        # Safety check for None values
+        if not tidal_track or not hasattr(tidal_track, 'name') or not tidal_track.name:
+            return [0.0]  # Return minimal score if track data is invalid
+
+        if not tidal_track.artist or not hasattr(tidal_track.artist, 'name') or not tidal_track.artist.name:
+            # If no artist info, only match on title
+            title_score = fuzz.ratio(original_track.title.lower(), tidal_track.name.lower())
+            return [title_score * 0.7]  # Lower weight for title-only match
+
         # Original matching
         title_score = fuzz.ratio(original_track.title.lower(), tidal_track.name.lower())
         artist_score = fuzz.ratio(original_track.artist.lower(), tidal_track.artist.name.lower())
@@ -784,11 +857,22 @@ class SpotifyToTidalTransfer:
             # Get all tracks
             tracks = self.get_spotify_playlist_tracks(spotify_playlist_id)
             print(f"Retrieved {len(tracks)} tracks from Spotify")
-            
+
+            # Check for empty playlist
+            if not tracks:
+                print("\n⚠️  Playlist is empty - nothing to transfer")
+                return {
+                    'success': False,
+                    'error': 'Source playlist contains no tracks',
+                    'total_tracks': 0,
+                    'found_tracks': 0,
+                    'not_found_tracks': 0
+                }
+
             # Search for tracks on Tidal with progress updates
             found_tracks = []
             not_found_tracks = []
-            
+
             print("\n--- Searching for tracks on Tidal ---")
             for i, track in enumerate(tracks, 1):
                 # Show different info for CJK vs Latin tracks
@@ -821,14 +905,14 @@ class SpotifyToTidalTransfer:
                     # Show stats for CJK vs Latin tracks
                     cjk_tracks = [t for t in tracks[:i] if TextProcessor.has_cjk_characters(t.title) or TextProcessor.has_cjk_characters(t.artist)]
                     latin_tracks = [t for t in tracks[:i] if not (TextProcessor.has_cjk_characters(t.title) or TextProcessor.has_cjk_characters(t.artist))]
-                    
+
                     if cjk_tracks and latin_tracks:
                         cjk_found = len([t for t in found_tracks if t in cjk_tracks])
                         latin_found = len([t for t in found_tracks if t in latin_tracks])
-                        
-                        cjk_rate = cjk_found / len([t for t in cjk_tracks if t in tracks[:i]]) * 100 if cjk_tracks else 0
-                        latin_rate = latin_found / len([t for t in latin_tracks if t in tracks[:i]]) * 100 if latin_tracks else 0
-                        
+
+                        cjk_rate = (cjk_found / len(cjk_tracks) * 100) if cjk_tracks else 0
+                        latin_rate = (latin_found / len(latin_tracks) * 100) if latin_tracks else 0
+
                         print(f"    CJK tracks: {cjk_rate:.1f}% success, Latin tracks: {latin_rate:.1f}% success")
             
             # Create Tidal playlist
@@ -955,9 +1039,13 @@ class SpotifyToTidalTransfer:
         """Export missing tracks to a text file for manual searching"""
         try:
             # Create filename based on playlist name and timestamp
-            import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Sanitize and ensure non-empty, with length limit
             safe_name = "".join(c for c in results['playlist_name'] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            if not safe_name:
+                safe_name = "playlist"
+            # Limit length to 100 chars (filesystem limits are typically 255)
+            safe_name = safe_name[:100]
             filename = f"missing_tracks_{safe_name}_{timestamp}.txt"
             
             with open(filename, 'w', encoding='utf-8') as f:
@@ -1040,14 +1128,17 @@ class SpotifyToTidalTransfer:
 
 def main():
     """Enhanced main function with better error handling"""
-    
-    # Spotify API credentials
-    SPOTIFY_CLIENT_ID = "your_spotify_client_id_here"
-    SPOTIFY_CLIENT_SECRET = "your_spotify_client_secret_here"
-    
-    if SPOTIFY_CLIENT_ID == "your_spotify_client_id_here":
-        print("⚠️  Please set your Spotify API credentials in the code!")
-        print("Get them from: https://developer.spotify.com/dashboard/applications")
+
+    # Spotify API credentials - USE ENVIRONMENT VARIABLES FOR SECURITY
+    SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
+    SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        print("⚠️  Spotify API credentials not found!")
+        print("\nPlease set environment variables:")
+        print("  export SPOTIFY_CLIENT_ID='your_client_id'")
+        print("  export SPOTIFY_CLIENT_SECRET='your_client_secret'")
+        print("\nGet credentials from: https://developer.spotify.com/dashboard/applications")
         print("Make sure to add 'http://127.0.0.1:8080' as a redirect URI")
         return
     
