@@ -1125,96 +1125,308 @@ class SpotifyToTidalTransfer:
             logger.warning(f"Failed to export missing tracks: {e}")
             print(f"\n⚠️  Could not export missing tracks to file: {e}")
 
+    def export_playlist(self, playlist_id: str, source: str = "spotify",
+                       output_format: str = "txt", output_file: str = None) -> Optional[str]:
+        """Export a playlist to M3U or TXT format.
+
+        Args:
+            playlist_id: The playlist ID to export
+            source: "spotify" or "tidal"
+            output_format: "m3u" or "txt"
+            output_file: Optional output filename (auto-generated if not provided)
+
+        Returns:
+            The output filename if successful, None otherwise
+        """
+        try:
+            # Get tracks based on source
+            if source == "spotify":
+                if not self.spotify:
+                    raise Exception("Spotify not authenticated")
+                playlist_info = self.spotify.playlist(playlist_id)
+                playlist_name = playlist_info['name']
+                tracks = self.get_spotify_playlist_tracks(playlist_id)
+            elif source == "tidal":
+                if not self.tidal_auth_manager or not self.tidal_auth_manager.session:
+                    raise Exception("Tidal not authenticated")
+                playlist = self.tidal_auth_manager.session.playlist(playlist_id)
+                playlist_name = playlist.name
+                tracks = []
+                for item in playlist.tracks():
+                    artist_name = item.artist.name if item.artist else "Unknown Artist"
+                    album_name = item.album.name if item.album else "Unknown Album"
+                    tracks.append(Track(
+                        title=item.name,
+                        artist=artist_name,
+                        album=album_name,
+                        duration_ms=item.duration * 1000 if item.duration else 0,
+                        tidal_id=str(item.id)
+                    ))
+            else:
+                raise ValueError(f"Invalid source: {source}. Use 'spotify' or 'tidal'")
+
+            if not tracks:
+                print(f"⚠️  Playlist is empty")
+                return None
+
+            # Generate filename if not provided
+            if not output_file:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_name = "".join(c for c in playlist_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                if not safe_name:
+                    safe_name = "playlist"
+                safe_name = safe_name[:100]
+                output_file = f"{safe_name}_{source}_{timestamp}.{output_format}"
+
+            # Write file based on format
+            with open(output_file, 'w', encoding='utf-8') as f:
+                if output_format == "m3u":
+                    f.write("#EXTM3U\n")
+                    f.write(f"#PLAYLIST:{playlist_name}\n")
+                    for track in tracks:
+                        duration_sec = track.duration_ms // 1000
+                        f.write(f"#EXTINF:{duration_sec},{track.artist} - {track.title}\n")
+                        # M3U typically has a path/URL, but we don't have that
+                        # Use a comment format that's still parseable
+                        f.write(f"# Album: {track.album}\n")
+                else:  # txt format
+                    f.write(f"Playlist: {playlist_name}\n")
+                    f.write(f"Source: {source.capitalize()}\n")
+                    f.write(f"Exported: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Total tracks: {len(tracks)}\n")
+                    f.write("=" * 50 + "\n\n")
+                    for i, track in enumerate(tracks, 1):
+                        f.write(f"{i:3}. {track.artist} - {track.title}\n")
+                        f.write(f"     Album: {track.album}\n")
+                        duration_min = track.duration_ms // 60000
+                        duration_sec = (track.duration_ms % 60000) // 1000
+                        f.write(f"     Duration: {duration_min}:{duration_sec:02d}\n\n")
+
+            print(f"✓ Exported {len(tracks)} tracks to: {output_file}")
+            return output_file
+
+        except Exception as e:
+            logger.error(f"Failed to export playlist: {e}")
+            print(f"❌ Export failed: {e}")
+            return None
+
+
+def setup_logging(verbose: bool = False):
+    """Configure logging level."""
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+def create_parser():
+    """Create the argument parser."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Spotify to Tidal Playlist Transfer Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s list                              List Spotify playlists
+  %(prog)s transfer                          Interactive transfer
+  %(prog)s transfer --playlist-id ID --yes   Non-interactive transfer
+  %(prog)s export --playlist-id ID           Export Spotify playlist to TXT
+  %(prog)s export --playlist-id ID --format m3u --source tidal
+        """
+    )
+
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='Enable debug logging')
+    parser.add_argument('--client-id', help='Spotify Client ID (or use SPOTIFY_CLIENT_ID env var)')
+    parser.add_argument('--client-secret', help='Spotify Client Secret (or use SPOTIFY_CLIENT_SECRET env var)')
+
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # List command
+    subparsers.add_parser('list', help='List all Spotify playlists')
+
+    # Transfer command
+    transfer_parser = subparsers.add_parser('transfer', help='Transfer a playlist from Spotify to Tidal')
+    transfer_parser.add_argument('--playlist-id', help='Spotify playlist ID (for non-interactive mode)')
+    transfer_parser.add_argument('--name', help='Custom name for the Tidal playlist')
+    transfer_parser.add_argument('--yes', '-y', action='store_true',
+                                help='Skip confirmation prompt')
+
+    # Export command
+    export_parser = subparsers.add_parser('export', help='Export a playlist to M3U or TXT file')
+    export_parser.add_argument('--playlist-id', required=True, help='Playlist ID to export')
+    export_parser.add_argument('--source', choices=['spotify', 'tidal'], default='spotify',
+                              help='Source service (default: spotify)')
+    export_parser.add_argument('--format', '-f', choices=['txt', 'm3u'], default='txt',
+                              help='Output format (default: txt)')
+    export_parser.add_argument('--output', '-o', help='Output filename (auto-generated if not specified)')
+
+    return parser
+
 
 def main():
-    """Enhanced main function with better error handling"""
+    """Main entry point with CLI argument parsing."""
+    parser = create_parser()
+    args = parser.parse_args()
 
-    # Spotify API credentials - USE ENVIRONMENT VARIABLES FOR SECURITY
-    SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
-    SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+    # Setup logging
+    setup_logging(args.verbose)
 
-    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+    # Get credentials from args or environment
+    client_id = args.client_id or os.getenv("SPOTIFY_CLIENT_ID", "")
+    client_secret = args.client_secret or os.getenv("SPOTIFY_CLIENT_SECRET", "")
+
+    if not client_id or not client_secret:
         print("⚠️  Spotify API credentials not found!")
         print("\nPlease set environment variables:")
         print("  export SPOTIFY_CLIENT_ID='your_client_id'")
         print("  export SPOTIFY_CLIENT_SECRET='your_client_secret'")
+        print("\nOr use command-line flags:")
+        print("  --client-id YOUR_ID --client-secret YOUR_SECRET")
         print("\nGet credentials from: https://developer.spotify.com/dashboard/applications")
         print("Make sure to add 'http://127.0.0.1:8080' as a redirect URI")
-        return
-    
+        return 1
+
     try:
-        # Initialize the enhanced transfer tool
+        # Initialize transfer tool
         transfer_tool = SpotifyToTidalTransfer(
-            spotify_client_id=SPOTIFY_CLIENT_ID,
-            spotify_client_secret=SPOTIFY_CLIENT_SECRET
+            spotify_client_id=client_id,
+            spotify_client_secret=client_secret
         )
-        
-        # Authenticate with both services
-        print("=== Enhanced Authentication System ===")
-        
-        if not transfer_tool.authenticate_spotify():
-            print("❌ Spotify authentication failed. Please check your credentials.")
-            return
-        
-        if not transfer_tool.authenticate_tidal():
-            print("❌ Tidal authentication failed. Please try again later.")
-            return
-        
-        # Get user's playlists
-        print("\n=== Your Spotify Playlists ===")
-        try:
-            playlists = transfer_tool.get_spotify_playlists()
-            
-            if not playlists:
-                print("No playlists found!")
-                return
-            
-            for i, playlist in enumerate(playlists, 1):
-                print(f"{i:2}. {playlist['name']} ({playlist['tracks_count']} tracks) - {playlist['owner']}")
-            
-            # Let user choose a playlist
-            while True:
-                try:
-                    choice = input(f"\nChoose a playlist to transfer (1-{len(playlists)}, or 'q' to quit): ")
-                    
-                    if choice.lower() == 'q':
-                        print("Goodbye!")
-                        return
-                    
-                    choice_num = int(choice) - 1
-                    if 0 <= choice_num < len(playlists):
-                        selected_playlist = playlists[choice_num]
-                        break
-                    else:
-                        print("Invalid choice! Please try again.")
-                        
-                except ValueError:
-                    print("Please enter a valid number or 'q' to quit.")
-            
-            # Confirm transfer
-            print(f"\nYou selected: {selected_playlist['name']}")
-            print(f"This playlist has {selected_playlist['tracks_count']} tracks")
-            
-            confirm = input("Proceed with transfer? (y/N): ")
-            if confirm.lower() != 'y':
-                print("Transfer cancelled.")
-                return
-            
-            # Transfer the playlist
-            results = transfer_tool.transfer_playlist(selected_playlist['id'])
-            transfer_tool.print_transfer_summary(results)
-            
-        except Exception as e:
-            logger.error(f"Error during playlist operations: {e}")
-            print(f"❌ An error occurred: {e}")
-    
+
+        # Handle commands
+        if args.command == 'list':
+            return cmd_list(transfer_tool)
+        elif args.command == 'transfer':
+            return cmd_transfer(transfer_tool, args)
+        elif args.command == 'export':
+            return cmd_export(transfer_tool, args)
+        else:
+            # No command - run interactive mode (legacy behavior)
+            return cmd_transfer(transfer_tool, args)
+
     except KeyboardInterrupt:
-        print("\n👋 Transfer cancelled by user.")
+        print("\n👋 Cancelled by user.")
+        return 130
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         print(f"❌ Unexpected error: {e}")
-        print("Please check the logs and try again.")
+        return 1
+
+
+def cmd_list(transfer_tool: SpotifyToTidalTransfer) -> int:
+    """List all Spotify playlists."""
+    if not transfer_tool.authenticate_spotify():
+        print("❌ Spotify authentication failed.")
+        return 1
+
+    print("\n=== Your Spotify Playlists ===")
+    playlists = transfer_tool.get_spotify_playlists()
+
+    if not playlists:
+        print("No playlists found!")
+        return 0
+
+    for i, playlist in enumerate(playlists, 1):
+        print(f"{i:2}. {playlist['name']} ({playlist['tracks_count']} tracks) - {playlist['owner']}")
+        print(f"    ID: {playlist['id']}")
+
+    return 0
+
+
+def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
+    """Transfer a playlist from Spotify to Tidal."""
+    # Authenticate
+    print("=== Authentication ===")
+    if not transfer_tool.authenticate_spotify():
+        print("❌ Spotify authentication failed.")
+        return 1
+
+    if not transfer_tool.authenticate_tidal():
+        print("❌ Tidal authentication failed.")
+        return 1
+
+    # Get playlist ID
+    playlist_id = getattr(args, 'playlist_id', None)
+    custom_name = getattr(args, 'name', None)
+    skip_confirm = getattr(args, 'yes', False)
+
+    if playlist_id:
+        # Non-interactive mode
+        if not skip_confirm:
+            playlist_info = transfer_tool.spotify.playlist(playlist_id)
+            print(f"\nPlaylist: {playlist_info['name']} ({playlist_info['tracks']['total']} tracks)")
+            confirm = input("Proceed with transfer? (y/N): ")
+            if confirm.lower() != 'y':
+                print("Transfer cancelled.")
+                return 0
+
+        results = transfer_tool.transfer_playlist(playlist_id, custom_name)
+        transfer_tool.print_transfer_summary(results)
+        return 0 if results.get('success') else 1
+
+    # Interactive mode
+    print("\n=== Your Spotify Playlists ===")
+    playlists = transfer_tool.get_spotify_playlists()
+
+    if not playlists:
+        print("No playlists found!")
+        return 0
+
+    for i, playlist in enumerate(playlists, 1):
+        print(f"{i:2}. {playlist['name']} ({playlist['tracks_count']} tracks) - {playlist['owner']}")
+
+    while True:
+        try:
+            choice = input(f"\nChoose a playlist to transfer (1-{len(playlists)}, or 'q' to quit): ")
+            if choice.lower() == 'q':
+                print("Goodbye!")
+                return 0
+
+            choice_num = int(choice) - 1
+            if 0 <= choice_num < len(playlists):
+                selected_playlist = playlists[choice_num]
+                break
+            print("Invalid choice! Please try again.")
+        except ValueError:
+            print("Please enter a valid number or 'q' to quit.")
+
+    print(f"\nYou selected: {selected_playlist['name']}")
+    print(f"This playlist has {selected_playlist['tracks_count']} tracks")
+
+    confirm = input("Proceed with transfer? (y/N): ")
+    if confirm.lower() != 'y':
+        print("Transfer cancelled.")
+        return 0
+
+    results = transfer_tool.transfer_playlist(selected_playlist['id'], custom_name)
+    transfer_tool.print_transfer_summary(results)
+    return 0 if results.get('success') else 1
+
+
+def cmd_export(transfer_tool: SpotifyToTidalTransfer, args) -> int:
+    """Export a playlist to file."""
+    source = args.source
+
+    # Authenticate based on source
+    if source == 'spotify':
+        if not transfer_tool.authenticate_spotify():
+            print("❌ Spotify authentication failed.")
+            return 1
+    else:  # tidal
+        if not transfer_tool.authenticate_tidal():
+            print("❌ Tidal authentication failed.")
+            return 1
+
+    result = transfer_tool.export_playlist(
+        playlist_id=args.playlist_id,
+        source=source,
+        output_format=args.format,
+        output_file=args.output
+    )
+
+    return 0 if result else 1
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main() or 0)

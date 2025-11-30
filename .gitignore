@@ -12,6 +12,11 @@ venv/
 env/
 ENV/
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
 # Session storage
 .spotify_tidal_config/
 

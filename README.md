@@ -216,7 +216,23 @@ Built with:
 
 ## Changelog
 
-### Version 0.0.2 (Current)
+### Version 0.0.3 (Current)
+
+**Added**:
+- ✅ Playlist export to TXT and M3U formats
+- ✅ Full CLI with subcommands (`list`, `transfer`, `export`)
+- ✅ Export from both Spotify and Tidal sources
+- ✅ `--verbose` flag for debug logging
+- ✅ `--client-id` and `--client-secret` CLI flags
+
+**Export examples**:
+```bash
+python3 script.py export --playlist-id ID                    # Export to TXT
+python3 script.py export --playlist-id ID --format m3u       # Export to M3U
+python3 script.py export --playlist-id ID --source tidal     # Export Tidal playlist
+```
+
+### Version 0.0.2
 
 **Fixed**:
 - ✅ Security: Environment variable support (no hardcoded credentials)

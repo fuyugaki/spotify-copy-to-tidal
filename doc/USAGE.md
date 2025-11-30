@@ -17,6 +17,18 @@ python3 script.py transfer --playlist-id PLAYLIST_ID --name "My Playlist" --yes
 
 # Debug mode
 python3 script.py -v transfer
+
+# Export playlist to TXT
+python3 script.py export --playlist-id PLAYLIST_ID
+
+# Export to M3U format
+python3 script.py export --playlist-id PLAYLIST_ID --format m3u
+
+# Export Tidal playlist
+python3 script.py export --playlist-id PLAYLIST_ID --source tidal
+
+# Export with custom filename
+python3 script.py export --playlist-id PLAYLIST_ID -o my_playlist.txt
 ```
 
 ## Authentication
@@ -71,3 +83,40 @@ Unmatched tracks are exported to `missing_tracks_<playlist>_<timestamp>.txt` wit
 Expected success rates:
 - Western/English: 85-95%
 - Japanese/CJK: 40-60%
+
+## Playlist Export
+
+Export playlists to TXT or M3U format for backup or use with other tools.
+
+### Export Formats
+
+**TXT** (default): Human-readable with track details
+```
+Playlist: My Playlist
+Source: Spotify
+Total tracks: 50
+==================================================
+
+  1. Artist - Title
+     Album: Album Name
+     Duration: 3:45
+```
+
+**M3U**: Standard playlist format compatible with media players
+```
+#EXTM3U
+#PLAYLIST:My Playlist
+#EXTINF:225,Artist - Title
+# Album: Album Name
+```
+
+### Export Options
+
+| Option | Description |
+|--------|-------------|
+| `--playlist-id` | Required. Playlist ID to export |
+| `--source` | `spotify` (default) or `tidal` |
+| `--format`, `-f` | `txt` (default) or `m3u` |
+| `--output`, `-o` | Custom output filename |
+
+Use `python3 script.py list` to find playlist IDs.
