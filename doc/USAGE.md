@@ -112,8 +112,11 @@ What would you like to do?
   2. Export to TXT file
   3. Export to TXT file (with Spotify links)
   4. Export to M3U file
-  q. Cancel
+  b. Back to playlist list
+  q. Quit
 ```
+
+After completing an action, you'll return to the playlist list to continue working.
 
 ### Export Formats
 

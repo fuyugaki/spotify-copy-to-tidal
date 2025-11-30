@@ -216,58 +216,23 @@ Built with:
 
 ## Changelog
 
-### Version 0.0.3 (Current)
+### 0.0.3 (Current)
+- Liked Songs support (`--playlist-id liked`)
+- Playlist export: `txt`, `txt-links`, `m3u` formats
+- Interactive menu loop (returns to playlist list after actions)
+- Full CLI with subcommands (`list`, `transfer`, `export`)
+- Fixed: Tidal OAuth double prompt, Spotify token saving
 
-**Added**:
-- ✅ **Liked Songs support** - Transfer your Liked Songs (appears first in playlist list, use `--playlist-id liked`)
-- ✅ **Playlist export** with three formats:
-  - `txt` - Plain text with track info
-  - `txt-links` - Text with Spotify/Tidal URLs
-  - `m3u` - Standard M3U playlist format
-- ✅ **Interactive action menu** - Choose transfer or export after selecting playlist
-- ✅ Full CLI with subcommands (`list`, `transfer`, `export`)
-- ✅ `--verbose` flag for debug logging
-- ✅ `--client-id` and `--client-secret` CLI flags
+### 0.0.2
+- Environment variable support for credentials
+- Proper file permissions on session storage
+- Specific exception handling
+- Reduced API calls (4 max per track)
+- Documentation in `/doc`
 
-**Fixed**:
-- ✅ Tidal OAuth no longer prompts twice
-- ✅ Spotify token saving uses correct method
-
-**Examples**:
-```bash
-# Liked Songs
-python3 script.py transfer --playlist-id liked --yes
-
-# Export formats
-python3 script.py export --playlist-id ID --format txt         # Plain text
-python3 script.py export --playlist-id ID --format txt-links   # With Spotify URLs
-python3 script.py export --playlist-id ID --format m3u         # M3U format
-python3 script.py export --playlist-id liked --source tidal    # Export from Tidal
-```
-
-### Version 0.0.2
-
-**Fixed**:
-- ✅ Security: Environment variable support (no hardcoded credentials)
-- ✅ Security: Proper file permissions on session storage
-- ✅ Security: Specific exception handling (no bare `except` clauses)
-- ✅ Bug: Correct token saving (full token_info dict)
-- ✅ Bug: Removed unused imports
-- ✅ Bug: Fixed duplicate datetime import
-- ✅ Performance: Reduced API calls (4 attempts max, down from 8)
-- ✅ Error handling: Atomic file writes for session storage
-- ✅ Error handling: Better exception specificity
-
-**Added**:
-- ✅ Comprehensive documentation (5 guides in `/doc`)
-- ✅ Security warnings in code comments
-- ✅ Better error messages
-
-### Version 0.0.1
-
+### 0.0.1
 - Initial release
-- Basic playlist transfer functionality
-- CJK character support
+- Playlist transfer with CJK support
 - Session persistence
 - Missing tracks export
 
