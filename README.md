@@ -73,19 +73,14 @@ Missing tracks exported to: missing_tracks_My_Music_Collection_20250816_143022.t
 
 ## Documentation
 
-Comprehensive documentation is available in the [`/doc`](doc/) directory:
+See the [`/doc`](doc/) directory:
 
-### User Guides
-- **[Installation Guide](doc/INSTALLATION.md)** - Complete setup instructions
-- **[Usage Guide](doc/USAGE.md)** - How to use the tool
-- **[Configuration Guide](doc/CONFIGURATION.md)** - Customization options
-- **[Troubleshooting Guide](doc/TROUBLESHOOTING.md)** - Solutions to common issues
-- **[Security Guide](doc/SECURITY.md)** - Security best practices
-
-### Developer Documentation
-- **[Issues by Priority](doc/ISSUES_BY_PRIORITY.md)** - Prioritized issue tracker and roadmap
-- **[Status Summary](doc/STATUS_SUMMARY.md)** - Project status and metrics
-- **[Additional Issues](doc/ADDITIONAL_ISSUES.md)** - Detailed technical analysis
+- **[Installation](doc/INSTALLATION.md)** — Setup instructions
+- **[Usage](doc/USAGE.md)** — How to use the tool
+- **[Configuration](doc/CONFIGURATION.md)** — Customization options
+- **[Troubleshooting](doc/TROUBLESHOOTING.md)** — Common issues
+- **[Security](doc/SECURITY.md)** — Security best practices
+- **[Issues & Roadmap](doc/ISSUES.md)** — Known issues and future plans
 
 ## How It Works
 
@@ -188,31 +183,9 @@ See [Security Guide](doc/SECURITY.md) for detailed information.
 - **Rate limiting**: Large playlists take time to process
 - **Memory usage**: All tracks loaded into memory (may be an issue for 1000+ track playlists)
 
-## Contributing
-
-Contributions welcome! Areas for improvement:
-
-- [ ] Enhanced CJK matching algorithms
-- [ ] Additional streaming service support
-- [ ] Proper encryption for session storage
-- [ ] Batch playlist processing
-- [ ] GUI interface
-- [ ] Configuration file support
-- [ ] Unit tests and integration tests
-
-### How to Contribute
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Test thoroughly
-5. Commit changes (`git commit -m 'Add amazing feature'`)
-6. Push to branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ## Disclaimer
 
@@ -231,9 +204,9 @@ The authors are not responsible for:
 
 Built with:
 
-- [Spotipy](https://github.com/plamere/spotipy) - Spotify Web API wrapper
-- [python-tidal](https://github.com/tamland/python-tidal) - Tidal API wrapper
-- [FuzzyWuzzy](https://github.com/seatgeek/fuzzywuzzy) - Fuzzy string matching
+- [Spotipy](https://github.com/plamere/spotipy) — Spotify Web API wrapper
+- [python-tidal](https://github.com/tamland/python-tidal) — Tidal API wrapper
+- [FuzzyWuzzy](https://github.com/seatgeek/fuzzywuzzy) — Fuzzy string matching
 
 ## Support
 
