@@ -1507,18 +1507,19 @@ def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
         transfer_tool.print_transfer_summary(results)
         return 0 if results.get('success') else 1
 
-    # Interactive mode
-    print("\n=== Your Spotify Playlists ===")
+    # Interactive mode - main loop
     playlists = transfer_tool.get_spotify_playlists()
 
     if not playlists:
         print("No playlists found!")
         return 0
 
-    for i, playlist in enumerate(playlists, 1):
-        print(f"{i:2}. {playlist['name']} ({playlist['tracks_count']} tracks) - {playlist['owner']}")
-
     while True:
+        print("\n=== Your Spotify Playlists ===")
+        for i, playlist in enumerate(playlists, 1):
+            print(f"{i:2}. {playlist['name']} ({playlist['tracks_count']} tracks) - {playlist['owner']}")
+
+        # Playlist selection
         try:
             choice = input(f"\nChoose a playlist (1-{len(playlists)}, or 'q' to quit): ")
             if choice.lower() == 'q':
@@ -1526,66 +1527,60 @@ def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
                 return 0
 
             choice_num = int(choice) - 1
-            if 0 <= choice_num < len(playlists):
-                selected_playlist = playlists[choice_num]
-                break
-            print("Invalid choice! Please try again.")
+            if not (0 <= choice_num < len(playlists)):
+                print("Invalid choice! Please try again.")
+                continue
+            selected_playlist = playlists[choice_num]
         except ValueError:
             print("Please enter a valid number or 'q' to quit.")
+            continue
 
-    print(f"\nYou selected: {selected_playlist['name']}")
-    print(f"This playlist has {selected_playlist['tracks_count']} tracks")
+        print(f"\nYou selected: {selected_playlist['name']}")
+        print(f"This playlist has {selected_playlist['tracks_count']} tracks")
 
-    # Action menu
-    print("\nWhat would you like to do?")
-    print("  1. Transfer to Tidal")
-    print("  2. Export to TXT file")
-    print("  3. Export to TXT file (with Spotify links)")
-    print("  4. Export to M3U file")
-    print("  q. Cancel")
+        # Action menu
+        print("\nWhat would you like to do?")
+        print("  1. Transfer to Tidal")
+        print("  2. Export to TXT file")
+        print("  3. Export to TXT file (with Spotify links)")
+        print("  4. Export to M3U file")
+        print("  b. Back to playlist list")
+        print("  q. Quit")
 
-    action = input("\nChoice: ").strip().lower()
+        action = input("\nChoice: ").strip().lower()
 
-    if action == 'q':
-        print("Cancelled.")
-        return 0
-    elif action == '2':
-        # Export to TXT
-        result = transfer_tool.export_playlist(
-            playlist_id=selected_playlist['id'],
-            source='spotify',
-            output_format='txt'
-        )
-        return 0 if result else 1
-    elif action == '3':
-        # Export to TXT with links
-        result = transfer_tool.export_playlist(
-            playlist_id=selected_playlist['id'],
-            source='spotify',
-            output_format='txt-links'
-        )
-        return 0 if result else 1
-    elif action == '4':
-        # Export to M3U
-        result = transfer_tool.export_playlist(
-            playlist_id=selected_playlist['id'],
-            source='spotify',
-            output_format='m3u'
-        )
-        return 0 if result else 1
-    elif action == '1':
-        # Transfer to Tidal
-        confirm = input("Proceed with transfer? (y/N): ")
-        if confirm.lower() != 'y':
-            print("Transfer cancelled.")
+        if action == 'q':
+            print("Goodbye!")
             return 0
+        elif action == 'b':
+            continue
+        elif action == '2':
+            transfer_tool.export_playlist(
+                playlist_id=selected_playlist['id'],
+                source='spotify',
+                output_format='txt'
+            )
+        elif action == '3':
+            transfer_tool.export_playlist(
+                playlist_id=selected_playlist['id'],
+                source='spotify',
+                output_format='txt-links'
+            )
+        elif action == '4':
+            transfer_tool.export_playlist(
+                playlist_id=selected_playlist['id'],
+                source='spotify',
+                output_format='m3u'
+            )
+        elif action == '1':
+            confirm = input("Proceed with transfer? (y/N): ")
+            if confirm.lower() == 'y':
+                results = transfer_tool.transfer_playlist(selected_playlist['id'], custom_name)
+                transfer_tool.print_transfer_summary(results)
+        else:
+            print("Invalid choice.")
 
-        results = transfer_tool.transfer_playlist(selected_playlist['id'], custom_name)
-        transfer_tool.print_transfer_summary(results)
-        return 0 if results.get('success') else 1
-    else:
-        print("Invalid choice.")
-        return 1
+        input("\nPress Enter to continue...")
 
 
 def cmd_export(transfer_tool: SpotifyToTidalTransfer, args) -> int:
