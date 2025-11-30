@@ -219,11 +219,18 @@ Built with:
 ### Version 0.0.3 (Current)
 
 **Added**:
+- ✅ **Liked Songs support** - Transfer your Liked Songs (appears first in playlist list)
 - ✅ Playlist export to TXT and M3U formats
 - ✅ Full CLI with subcommands (`list`, `transfer`, `export`)
 - ✅ Export from both Spotify and Tidal sources
 - ✅ `--verbose` flag for debug logging
 - ✅ `--client-id` and `--client-secret` CLI flags
+
+**Liked Songs examples**:
+```bash
+python3 script.py transfer --playlist-id liked --yes         # Transfer Liked Songs
+python3 script.py export --playlist-id liked                 # Export Liked Songs
+```
 
 **Export examples**:
 ```bash

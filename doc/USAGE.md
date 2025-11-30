@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-# List playlists
+# List playlists (includes Liked Songs)
 python3 script.py list
 
 # Interactive transfer
@@ -11,6 +11,9 @@ python3 script.py transfer
 
 # Non-interactive transfer
 python3 script.py transfer --playlist-id PLAYLIST_ID --yes
+
+# Transfer Liked Songs
+python3 script.py transfer --playlist-id liked --yes
 
 # With custom name
 python3 script.py transfer --playlist-id PLAYLIST_ID --name "My Playlist" --yes
@@ -21,6 +24,9 @@ python3 script.py -v transfer
 # Export playlist to TXT
 python3 script.py export --playlist-id PLAYLIST_ID
 
+# Export Liked Songs
+python3 script.py export --playlist-id liked
+
 # Export to M3U format
 python3 script.py export --playlist-id PLAYLIST_ID --format m3u
 
@@ -29,6 +35,15 @@ python3 script.py export --playlist-id PLAYLIST_ID --source tidal
 
 # Export with custom filename
 python3 script.py export --playlist-id PLAYLIST_ID -o my_playlist.txt
+```
+
+## Liked Songs
+
+Your Spotify "Liked Songs" collection appears as the first item when listing playlists. Use the special ID `liked` to transfer or export it:
+
+```bash
+python3 script.py transfer --playlist-id liked --yes
+python3 script.py export --playlist-id liked
 ```
 
 ## Authentication

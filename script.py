@@ -561,15 +561,32 @@ class SpotifyToTidalTransfer:
             logger.error(f"Unexpected Tidal authentication error: {e}")
             return False
     
-    def get_spotify_playlists(self) -> List[Dict]:
-        """Get all user's Spotify playlists with error handling"""
+    def get_spotify_playlists(self, include_liked: bool = True) -> List[Dict]:
+        """Get all user's Spotify playlists with error handling.
+
+        Args:
+            include_liked: If True, includes "Liked Songs" as first item
+        """
         if not self.spotify:
             raise Exception("Spotify not authenticated")
-        
+
         playlists = []
         try:
+            # Add Liked Songs as a special "playlist"
+            if include_liked:
+                liked_count = self._get_liked_songs_count()
+                if liked_count > 0:
+                    user = self.spotify.current_user()
+                    playlists.append({
+                        'id': 'liked',
+                        'name': 'Liked Songs',
+                        'description': 'Your liked songs from Spotify',
+                        'tracks_count': liked_count,
+                        'owner': user['display_name']
+                    })
+
             results = self.spotify.current_user_playlists(limit=50)
-            
+
             while results:
                 for playlist in results['items']:
                     if playlist:
@@ -580,24 +597,89 @@ class SpotifyToTidalTransfer:
                             'tracks_count': playlist['tracks']['total'],
                             'owner': playlist['owner']['display_name']
                         })
-                
+
                 if results['next']:
                     self.rate_limiter.wait()
                     results = self.spotify.next(results)
                 else:
                     break
-            
+
             return playlists
-            
+
         except Exception as e:
             logger.error(f"Failed to get Spotify playlists: {e}")
             raise
-    
-    def get_spotify_playlist_tracks(self, playlist_id: str) -> List[Track]:
-        """Get all tracks from a Spotify playlist with rate limiting"""
+
+    def _get_liked_songs_count(self) -> int:
+        """Get the total count of liked songs."""
+        try:
+            results = self.spotify.current_user_saved_tracks(limit=1)
+            return results.get('total', 0)
+        except Exception as e:
+            logger.debug(f"Failed to get liked songs count: {e}")
+            return 0
+
+    def get_spotify_liked_songs(self) -> List[Track]:
+        """Get all liked songs from Spotify."""
         if not self.spotify:
             raise Exception("Spotify not authenticated")
-        
+
+        tracks = []
+        try:
+            results = self.spotify.current_user_saved_tracks(limit=50)
+
+            while results:
+                for item in results['items']:
+                    if item and item.get('track') and item['track'].get('type') == 'track':
+                        track = item['track']
+
+                        if not track.get('artists'):
+                            artists = 'Unknown Artist'
+                        else:
+                            artists = ', '.join([a.get('name', 'Unknown') for a in track['artists'] if a])
+
+                        title = track.get('name', 'Unknown Track')
+                        album = track.get('album', {}).get('name', 'Unknown Album') if track.get('album') else 'Unknown Album'
+                        duration_ms = track.get('duration_ms', 0)
+                        track_id = track.get('id', '')
+
+                        if not title or title == 'Unknown Track':
+                            logger.warning(f"Skipping track with missing title: {track}")
+                            continue
+
+                        tracks.append(Track(
+                            title=title,
+                            artist=artists,
+                            album=album,
+                            duration_ms=duration_ms,
+                            spotify_id=track_id
+                        ))
+
+                if results['next']:
+                    self.rate_limiter.wait()
+                    results = self.spotify.next(results)
+                else:
+                    break
+
+            return tracks
+
+        except Exception as e:
+            logger.error(f"Failed to get liked songs: {e}")
+            raise
+    
+    def get_spotify_playlist_tracks(self, playlist_id: str) -> List[Track]:
+        """Get all tracks from a Spotify playlist with rate limiting.
+
+        Args:
+            playlist_id: Playlist ID, or 'liked' for Liked Songs
+        """
+        if not self.spotify:
+            raise Exception("Spotify not authenticated")
+
+        # Handle special 'liked' playlist
+        if playlist_id == 'liked':
+            return self.get_spotify_liked_songs()
+
         tracks = []
         try:
             results = self.spotify.playlist_tracks(playlist_id, limit=100)
@@ -839,20 +921,31 @@ class SpotifyToTidalTransfer:
             logger.error(f"Failed to add tracks to playlist: {e}")
             return False
     
-    def transfer_playlist(self, spotify_playlist_id: str, 
+    def transfer_playlist(self, spotify_playlist_id: str,
                          new_playlist_name: str = None) -> Dict:
-        """Enhanced playlist transfer with comprehensive error handling"""
-        
+        """Enhanced playlist transfer with comprehensive error handling.
+
+        Args:
+            spotify_playlist_id: Playlist ID, or 'liked' for Liked Songs
+            new_playlist_name: Optional custom name for Tidal playlist
+        """
         print(f"\n--- Starting Enhanced Playlist Transfer ---")
-        
+
         try:
-            # Get Spotify playlist info
-            spotify_playlist = self.spotify.playlist(spotify_playlist_id)
-            playlist_name = new_playlist_name or f"{spotify_playlist['name']} (from Spotify)"
-            playlist_description = f"Transferred from Spotify playlist: {spotify_playlist['name']}"
-            
-            print(f"Transferring: {spotify_playlist['name']}")
-            print(f"Tracks: {spotify_playlist['tracks']['total']}")
+            # Get Spotify playlist info - handle 'liked' specially
+            if spotify_playlist_id == 'liked':
+                source_name = 'Liked Songs'
+                track_count = self._get_liked_songs_count()
+            else:
+                spotify_playlist = self.spotify.playlist(spotify_playlist_id)
+                source_name = spotify_playlist['name']
+                track_count = spotify_playlist['tracks']['total']
+
+            playlist_name = new_playlist_name or f"{source_name} (from Spotify)"
+            playlist_description = f"Transferred from Spotify: {source_name}"
+
+            print(f"Transferring: {source_name}")
+            print(f"Tracks: {track_count}")
             
             # Get all tracks
             tracks = self.get_spotify_playlist_tracks(spotify_playlist_id)
@@ -1130,7 +1223,7 @@ class SpotifyToTidalTransfer:
         """Export a playlist to M3U or TXT format.
 
         Args:
-            playlist_id: The playlist ID to export
+            playlist_id: The playlist ID to export, or 'liked' for Liked Songs
             source: "spotify" or "tidal"
             output_format: "m3u" or "txt"
             output_file: Optional output filename (auto-generated if not provided)
@@ -1143,8 +1236,12 @@ class SpotifyToTidalTransfer:
             if source == "spotify":
                 if not self.spotify:
                     raise Exception("Spotify not authenticated")
-                playlist_info = self.spotify.playlist(playlist_id)
-                playlist_name = playlist_info['name']
+                # Handle special 'liked' playlist
+                if playlist_id == 'liked':
+                    playlist_name = 'Liked Songs'
+                else:
+                    playlist_info = self.spotify.playlist(playlist_id)
+                    playlist_name = playlist_info['name']
                 tracks = self.get_spotify_playlist_tracks(playlist_id)
             elif source == "tidal":
                 if not self.tidal_auth_manager or not self.tidal_auth_manager.session:
@@ -1353,8 +1450,12 @@ def cmd_transfer(transfer_tool: SpotifyToTidalTransfer, args) -> int:
     if playlist_id:
         # Non-interactive mode
         if not skip_confirm:
-            playlist_info = transfer_tool.spotify.playlist(playlist_id)
-            print(f"\nPlaylist: {playlist_info['name']} ({playlist_info['tracks']['total']} tracks)")
+            if playlist_id == 'liked':
+                track_count = transfer_tool._get_liked_songs_count()
+                print(f"\nPlaylist: Liked Songs ({track_count} tracks)")
+            else:
+                playlist_info = transfer_tool.spotify.playlist(playlist_id)
+                print(f"\nPlaylist: {playlist_info['name']} ({playlist_info['tracks']['total']} tracks)")
             confirm = input("Proceed with transfer? (y/N): ")
             if confirm.lower() != 'y':
                 print("Transfer cancelled.")
