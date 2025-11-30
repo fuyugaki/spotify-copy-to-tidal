@@ -1011,6 +1011,151 @@ class SpotifyToTidalTransfer:
             logger.debug(f"Custom search error: {e}")
             return []
 
+    def lookup_musicbrainz_artist(self, artist_name: str) -> List[Dict]:
+        """Look up an artist on MusicBrainz and return their aliases.
+
+        MusicBrainz stores alternate names/aliases for artists, including
+        romanized versions of non-Latin names.
+        """
+        try:
+            # MusicBrainz API requires a User-Agent
+            headers = {
+                'User-Agent': 'SpotifyToTidal/1.0 (playlist transfer tool)',
+                'Accept': 'application/json'
+            }
+
+            # Search for the artist
+            search_url = "https://musicbrainz.org/ws/2/artist"
+            params = {
+                'query': artist_name,
+                'fmt': 'json',
+                'limit': 5
+            }
+
+            self.rate_limiter.wait()  # MusicBrainz has rate limits too
+            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+
+            if response.status_code != 200:
+                logger.debug(f"MusicBrainz search failed: {response.status_code}")
+                return []
+
+            data = response.json()
+            artists = data.get('artists', [])
+
+            results = []
+            for artist in artists:
+                artist_info = {
+                    'id': artist.get('id', ''),
+                    'name': artist.get('name', ''),
+                    'aliases': [],
+                    'score': artist.get('score', 0)
+                }
+
+                # Collect aliases (alternate names)
+                for alias in artist.get('aliases', []):
+                    alias_name = alias.get('name', '')
+                    alias_type = alias.get('type', '')
+                    if alias_name and alias_name != artist_info['name']:
+                        artist_info['aliases'].append({
+                            'name': alias_name,
+                            'type': alias_type
+                        })
+
+                # Also check sort-name (often romanized for non-Latin artists)
+                sort_name = artist.get('sort-name', '')
+                if sort_name and sort_name != artist_info['name']:
+                    # Add sort-name as an alias if not already present
+                    existing_names = [a['name'] for a in artist_info['aliases']]
+                    if sort_name not in existing_names:
+                        artist_info['aliases'].insert(0, {
+                            'name': sort_name,
+                            'type': 'Sort name'
+                        })
+
+                results.append(artist_info)
+
+            return results
+
+        except requests.RequestException as e:
+            logger.debug(f"MusicBrainz request error: {e}")
+            return []
+        except Exception as e:
+            logger.debug(f"MusicBrainz lookup error: {e}")
+            return []
+
+    def _musicbrainz_lookup_flow(self, track: Track) -> Optional[str]:
+        """Flow for looking up artist aliases via MusicBrainz."""
+        # Extract primary artist
+        primary_artist = track.artist.split(',')[0].strip()
+
+        print(f"\n      Looking up artist on MusicBrainz: {primary_artist}")
+        artists = self.lookup_musicbrainz_artist(primary_artist)
+
+        if not artists:
+            # Let user try a different name
+            try:
+                custom_name = input("      No results. Enter artist name to search (or press Enter to go back): ").strip()
+                if not custom_name:
+                    return None
+                artists = self.lookup_musicbrainz_artist(custom_name)
+                if not artists:
+                    print("      No artists found on MusicBrainz.")
+                    return None
+            except EOFError:
+                return None
+
+        # Show artists and their aliases
+        print(f"\n      --- MusicBrainz Results ---")
+        for i, artist in enumerate(artists, 1):
+            print(f"      {i}. {artist['name']} (score: {artist['score']}%)")
+            if artist['aliases']:
+                alias_strs = [f"{a['name']}" + (f" [{a['type']}]" if a['type'] else "") for a in artist['aliases'][:5]]
+                print(f"         Aliases: {', '.join(alias_strs)}")
+        print(f"      0. Back to options")
+
+        try:
+            choice = input(f"\n      Select artist (0-{len(artists)}): ").strip()
+            if choice == '0' or choice == '':
+                return None
+
+            idx = int(choice) - 1
+            if 0 <= idx < len(artists):
+                selected_artist = artists[idx]
+
+                # Build search options from artist name and aliases
+                search_options = [selected_artist['name']]
+                for alias in selected_artist['aliases']:
+                    if alias['name'] not in search_options:
+                        search_options.append(alias['name'])
+
+                # Let user choose which name to search with
+                print(f"\n      --- Search with name ---")
+                for i, name in enumerate(search_options[:8], 1):
+                    print(f"      {i}. {name} + {track.title}")
+                print(f"      0. Back")
+
+                name_choice = input(f"\n      Select name to search (0-{min(len(search_options), 8)}): ").strip()
+                if name_choice == '0' or name_choice == '':
+                    return None
+
+                name_idx = int(name_choice) - 1
+                if 0 <= name_idx < len(search_options):
+                    search_query = f"{search_options[name_idx]} {track.title}"
+                    print(f"\n      Searching Tidal for: {search_query}")
+                    results = self.custom_tidal_search(search_query)
+
+                    if not results:
+                        print("      No results found on Tidal.")
+                        return None
+
+                    return self._display_track_selection(results, f"Results for '{search_query}'")
+
+        except (ValueError, EOFError):
+            pass
+
+        print("      Invalid selection.")
+        return None
+
     def interactive_track_fallback(self, track: Track, near_matches: List[NearMatch]) -> Optional[str]:
         """Interactive fallback when automatic matching fails.
 
@@ -1021,8 +1166,6 @@ class SpotifyToTidalTransfer:
         Returns:
             tidal_id if user selects a track, None to skip
         """
-        skip_all = False
-
         while True:
             print(f"\n  ⚠️  Could not automatically match: {track}")
             print(f"      Album: {track.album}")
@@ -1036,14 +1179,15 @@ class SpotifyToTidalTransfer:
                 options.append("1. Show near matches (none found)")
             options.append("2. Search by artist on Tidal")
             options.append("3. Custom search")
-            options.append("4. Skip this track")
-            options.append("5. Skip all remaining unfound tracks")
+            options.append("4. Lookup artist aliases (MusicBrainz)")
+            options.append("5. Skip this track")
+            options.append("6. Skip all remaining unfound tracks")
 
             for opt in options:
                 print(f"      {opt}")
 
             try:
-                choice = input("\n      Choice (1-5): ").strip()
+                choice = input("\n      Choice (1-6): ").strip()
             except EOFError:
                 return None
 
@@ -1070,17 +1214,23 @@ class SpotifyToTidalTransfer:
                     return selected
 
             elif choice == '4':
+                # MusicBrainz lookup
+                selected = self._musicbrainz_lookup_flow(track)
+                if selected:
+                    return selected
+
+            elif choice == '5':
                 # Skip this track
                 print("      Skipping track.")
                 return None
 
-            elif choice == '5':
+            elif choice == '6':
                 # Skip all
                 print("      Skipping all remaining unfound tracks.")
                 return 'SKIP_ALL'
 
             else:
-                print("      Invalid choice. Please enter 1-5.")
+                print("      Invalid choice. Please enter 1-6.")
 
     def _display_track_selection(self, tracks: List[NearMatch], title: str) -> Optional[str]:
         """Display a list of tracks and let user select one."""
