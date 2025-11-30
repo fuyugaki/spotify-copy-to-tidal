@@ -2,6 +2,7 @@
 CLAUDE.md
 .claude/
 .cache/
+.cache
 
 # Environment variables (credentials)
 .env
