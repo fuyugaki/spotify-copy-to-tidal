@@ -14,7 +14,8 @@
 
 **Interactive Fallback**: Manual search options when tracks aren't found automatically
 - Near matches display (tracks below threshold)
-- Artist search on Tidal (browse top tracks)
+- Artist search on Tidal (browse top tracks or albums/releases)
+- Album browsing (view full discography including EPs/singles)
 - Custom search query
 - MusicBrainz artist alias lookup (romanized names for international artists)
 - Skip track / Skip all remaining options

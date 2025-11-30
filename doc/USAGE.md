@@ -102,7 +102,7 @@ When a track isn't found automatically in interactive mode, you'll see options t
 | Option | Description |
 |--------|-------------|
 | **Near matches** | Shows tracks that scored below the threshold but might be correct |
-| **Search by artist** | Find the artist on Tidal and browse their top tracks |
+| **Search by artist** | Find the artist on Tidal, then browse their top tracks or albums/releases |
 | **Custom search** | Enter your own search query |
 | **MusicBrainz lookup** | Find alternate names/romanizations for the artist (e.g., `井内竜次` → `Ryuji Iuchi`) |
 | **Skip** | Skip this track and continue |
@@ -130,6 +130,36 @@ MusicBrainz stores alternate names and aliases for artists worldwide. This is es
 
       Select name to search (0-3):
 ```
+
+### Artist Album Browsing
+
+When you select "Search by artist on Tidal", you can choose to browse the artist's full discography:
+
+```
+      --- Keiichi Okabe ---
+      1. View top tracks
+      2. Browse albums/releases
+      0. Back to artist list
+
+      Choice (0-2): 2
+
+      --- Albums by Keiichi Okabe ---
+       1. NieR:Automata Original Soundtrack (2017)
+       2. NieR Gestalt & Replicant Original Soundtrack (2010)
+       3. NieR:Automata Arranged & Unreleased Tracks (EP/Single)
+       0. Back
+
+      Select album (0-3): 1
+
+      --- Tracks from NieR:Automata Original Soundtrack ---
+       1. Keiichi Okabe - Prologue
+          Album: NieR:Automata Original Soundtrack
+       2. Keiichi Okabe - City Ruins (Shade)
+          Album: NieR:Automata Original Soundtrack
+      ...
+```
+
+This is useful when a track isn't in the artist's "top tracks" but exists on one of their albums.
 
 ### Disabling Interactive Fallback
 

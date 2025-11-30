@@ -221,10 +221,11 @@ Built with:
 ### 0.0.4 (Current)
 - **Interactive track fallback**: When a track isn't found, offers manual search options
   - Show near matches (tracks below threshold but potentially correct)
-  - Search by artist on Tidal (browse artist's top tracks)
+  - Search by artist on Tidal (browse top tracks or albums/releases)
   - Custom search query
   - MusicBrainz artist alias lookup (finds romanized names for non-Latin artists)
   - Skip track / Skip all remaining
+- **Album browsing**: Browse all albums, EPs, and singles when searching by artist
 - **MusicBrainz integration**: Lookup alternate artist names and aliases for better matching of international artists
 - Works in interactive mode; use `--yes` flag for fully automated (no prompts)
 
