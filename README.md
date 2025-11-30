@@ -243,7 +243,7 @@ Built with:
 
 ## Changelog
 
-### Version 2.0 (Current)
+### Version 0.0.2 (Current)
 
 **Fixed**:
 - ✅ Security: Environment variable support (no hardcoded credentials)
@@ -261,7 +261,7 @@ Built with:
 - ✅ Security warnings in code comments
 - ✅ Better error messages
 
-### Version 1.0
+### Version 0.0.1
 
 - Initial release
 - Basic playlist transfer functionality
@@ -269,6 +269,3 @@ Built with:
 - Session persistence
 - Missing tracks export
 
----
-
-Made with ❤️ for music lovers who use multiple streaming platforms

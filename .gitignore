@@ -1,0 +1,19 @@
+# Claude Code settings (local only)
+CLAUDE.md
+.claude/
+.cache/
+
+# Environment variables (credentials)
+.env
+.env.local
+
+# Python virtual environment
+venv/
+env/
+ENV/
+
+# Session storage
+.spotify_tidal_config/
+
+# Missing tracks exports
+missing_tracks_*.txt
